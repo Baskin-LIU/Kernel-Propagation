@@ -22,6 +22,7 @@ class linear(rho):
         self.defaultd = torch.ones(n_neuron)
 
     def __call__(self, x):
+        self.d = torch.ones_like(x)
         return x
 
     def derivation(self, x):
@@ -55,6 +56,22 @@ class sigmoid(rho):
     def derivation(self, x):
         a = torch.sigmoid(self.scale*x)
         return self.scale*a*(1-a)
+        
+
+class tanh(rho):
+    def __init__(self, n_neuron, scale=1.6, *args, **kwargs):
+        self.d = torch.zeros(n_neuron)
+        self.defaultd = torch.zeros(n_neuron)
+        self.scale = scale
+
+    def __call__(self, x):
+        a = torch.tanh(self.scale*x)
+        self.d = self.scale*(1.0 - a**2)
+        return a
+
+    def derivation(self, x):
+        a = torch.tanh(self.scale*x)
+        return self.scale*(1.0 - a**2)
 
 
 class softplus(rho):
@@ -193,5 +210,6 @@ RHO = {
     'spiking': spiking,
     'spikingWTA': spikingWTA,
     'probSpiking': probSpiking,
-    'probSpikingWTA': probSpikingWTA, 
+    'probSpikingWTA': probSpikingWTA,
+    'tanh': tanh,
 }

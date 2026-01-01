@@ -247,3 +247,15 @@ class RecDENeurons(Neurons):
         self.W_in += self.dW_in * self.dt * self.lr_w
         if self.bias: # how is bias being lpf ？？？？？？？？
             self.b += (self.C*self.elig_b).sum(axis=1) * self.dt * self.lr_w
+
+
+
+fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+tau_de = np.clip(dt/(Rcd['dt_tau_de'][:, 1000:]), -30, 80)
+for i in range(n_hidden1):
+    axs[0].plot(tau_de[i, 8000:8500], linewidth=2.5)
+for i in range(n_hidden2):
+    axs[1].plot(Rcd['rhod'][i, 3000:3500], linewidth=2.5)
+axs[0].set_ylabel(r"$\tau^*$", rotation=0)
+axs[1].set_ylabel(r"$\rho'$", rotation=0)
+plt.show()
