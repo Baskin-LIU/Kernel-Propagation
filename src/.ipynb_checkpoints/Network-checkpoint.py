@@ -36,19 +36,17 @@ class FwdNetwork(torch.nn.Module):
         return r, u
 
     
-    def prop(self, error=0.):
+    def prop(self, error=0., learn=True):
         self.layers[-1].E_trg(e_trg=self.beta*error)
         for l in reversed(self.layers):
-            l.prop()
+            l.prop(learn)
 
     
     def epsilon(self, layer=None):
         if layer is not None:
             return self.layers[layer].epsilon.clone().detach()
         else:
-            return [l.epsilon for l in self.layers]    
-
-    
+            return [l.epsilon for l in self.layers]      
     def learnW(self, layers=None):
         for i, l in enumerate(self.layers):
             l.learnW()
@@ -86,6 +84,9 @@ class DEFwdNetwork(FwdNetwork):
                 l.P = torch.zeros(l.n_neurons, n_tau)
                 l.P[torch.arange(l.n_neurons), inv] = 1.
                 totaln += n_tau
+
+                l.dt_tau_uniq = l.dt/l.tau_unique
+                l.decay_uniq = 1 - l.dt_tau_uniq
 
         self.Tau = torch.hstack(self.Tau)
         assert self.Tau.numel() == torch.unique(self.Tau).numel() #forbid same tau in different layers

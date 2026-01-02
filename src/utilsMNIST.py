@@ -28,7 +28,7 @@ default_data_config = {
     'iid_noise_scale': 2e-2,
     'shear_scale': 0.75,
     'shuffle_seq': False,
-    'final_seq_length': 144,
+    'final_seq_length': 72,
     'seed': 42,
     'url': 'https://github.com/greydanus/mnist1d/raw/master/mnist1d_data.pkl',
     'duration': 72,
@@ -64,7 +64,6 @@ def buildMNISTNet(model_config, general_config):
     tau = []
     tau_min, tau_max = model_config['Tau0']
     tau.append(np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0], dtype=np.float32))
-    #tau.append(np.linspace(tau_min, tau_max, LP_size[0], dtype=np.float32))
     for i in range(model_config['num_LP_layers']-1):
         tau_uniq = model_config['Tau%d'%(i+1)]
         tau.append(np.repeat(tau_uniq[:, None],
@@ -72,32 +71,56 @@ def buildMNISTNet(model_config, general_config):
     layers = torch.nn.ModuleList()
     prev_n=model_config['n_in']
     
-    for i in range(model_config['num_LP_layers']-1):
-        scale = 1. if i==0 else 0.2
-        activation = model_config["activation"] if i==0 else "linear"
-        layers.append(
-            FwdDENeurons(
-                n_in=prev_n,
-                n_neurons=LP_size[i],
-                tau=tau[i], 
-                activation=activation, 
-                dt=dt, 
-                scale=scale
-                )
+    # for i in range(model_config['num_LP_layers']-1):
+    #     scale = 1. if i==0 else 0.2
+    #     activation = model_config["activation"] if i==0 else "linear"
+    #     layers.append(
+    #         FwdDENeurons(
+    #             n_in=prev_n,
+    #             n_neurons=LP_size[i],
+    #             tau=tau[i], 
+    #             activation=activation, 
+    #             dt=dt, 
+    #             scale=scale
+    #             )
+    #     )
+    #     prev_n=LP_size[i]
+
+    layers.append(
+        FwdDENeurons(
+            n_in=prev_n,
+            n_neurons=LP_size[0],
+            tau=tau[0], 
+            activation=model_config["activation"], 
+            dt=dt, 
+            scale=1.
         )
-        prev_n=LP_size[i]
+    )
+    prev_n=LP_size[0]
+
+    for i in range(model_config['num_LP_layers']-2):
+        layers.append(
+            FwdDENeuronsReduced(
+                n_in=prev_n,
+                n_neurons=LP_size[i+1],
+                tau=tau[i+1], 
+                activation="linear", 
+                dt=dt, 
+            )
+        )
+        prev_n=LP_size[i+1]
 
     layers.append(
         LastFwdDENeurons(
             n_in=prev_n, 
-            n_neurons=LP_size[i+1], 
-            tau=tau[i+1], 
+            n_neurons=LP_size[i+2], 
+            tau=tau[i+2], 
             activation=model_config["activation"], 
             dt=dt, 
-            scale=scale
+            scale=1.0
             )
     )
-    prev_n=LP_size[i+1]
+    prev_n=LP_size[i+2]
     for i in range(model_config['num_Ins_layers']):
         layers.append(
             FwdInsNeurons(
@@ -119,31 +142,34 @@ def buildMNISTNet(model_config, general_config):
             scale=1.0
             )
     )
-
     
     return DEFwdNetwork(layers=layers)
 
 
-def train_batch(model, optimizer, x, y):
-    batch, n_steps, _ = x.shape
-    model.reset(batch)
+def train_batch(model, optimizer, x, y, answer_period):
+    n_steps = x.shape[1]
     total_error = 0.
-    one_hot_label = torch.zeros(batch, 10)   
-    one_hot_label[np.arange(batch), y] = 1.
-    with torch.no_grad():
-        for t in range(n_steps):
-            r_out, _= model.step(x[:, t])
-            if t>=136:
-                p = torch.softmax(r_out, dim=1)
-                error = one_hot_label - p
-                model.prop(error)
-                model.backwards()
-                optimizer.step()
-                optimizer.zero_grad()
-                total_error += -(one_hot_label * torch.log(p)).mean().item()
-            else:
-                model.prop(0)
-    return total_error, 0
+    one_hot_label = F.one_hot(y, num_classes=10)
+    model.reset()
+    prex = torch.zeros(x.shape[0], 1)
+    for t in range(10):
+        r_out,_ = model.step(prex)
+        model.prop(learn=False)
+    for t in range(n_steps):
+        r_out,_ = model.step(x[:, t])
+        if n_steps-t <= answer_period:
+            p = torch.softmax(r_out, dim=1)
+            error = (one_hot_label - p)/answer_period
+            model.prop(error=error)
+            model.backwards()
+            optimizer.step()
+            optimizer.zero_grad()
+            total_error += -(one_hot_label * torch.log(p)).mean().item()
+        else:
+            model.prop(learn=False)
+            
+            
+    return total_error/answer_period
 
 
 def test(model, x_test, y_test, answer_period=2):

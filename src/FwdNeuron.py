@@ -108,9 +108,9 @@ class FwdNeurons(Neurons):
         self.r = self.rho(self.u_bar)
     
 
-    def prop(self,):
+    def prop(self, learn=True):
         self.epsilon = self.wTe * self.rho.d
-        if self.previous_layer != None:
+        if learn and self.previous_layer is not None:
             self.previous_layer.wTe = self.epsilon @ self.W_in
         return 0, 0
         
@@ -133,7 +133,7 @@ class FwdNeurons(Neurons):
             # W_in = torch.randn(self.n_neurons, self.n_in)
             # W_in *= (2/(W_in**2).sum(dim=1, keepdim=True))**0.5
             W_in = torch.empty(self.n_neurons, self.n_in)
-            torch.nn.init.kaiming_normal_(W_in, mode="fan_out", nonlinearity=self.activation)
+            torch.nn.init.kaiming_normal_(W_in, mode="fan_in", nonlinearity=self.activation)
             self.W_in = torch.nn.Parameter(W_in)
 
         if bias is not None:
