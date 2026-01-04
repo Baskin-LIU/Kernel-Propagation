@@ -25,8 +25,7 @@ class LastFwdDENeurons(FwdNeurons):
         
 
     def backwards(self, ):
-        dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
-        self.W_in.grad = -dW_in.clone()
+        self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
         self.bias.grad = -self.epsilon.mean(0) * self.dt
 
     def reset(self,):
@@ -48,7 +47,8 @@ class FwdDENeurons(FwdNeurons):
         # Bias eligibility (batch, n_exp, n_neuron)
         self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
         # Kernel propagation
-        if learn and self.previous_layer is not None:  #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
+        if learn and self.previous_layer is not None:  
+            #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
             self.previous_layer.K = (self.rho.d[:, None, :] * self.P * self.K) @ self.W_in
         
         return 0, 0
@@ -61,8 +61,7 @@ class FwdDENeurons(FwdNeurons):
 
     def backwards(self, ):
         K = self.K[:,:self.downstream].clone()
-        dW_in = (K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)*self.dt
-        self.W_in.grad = -dW_in.clone()
+        self.W_in.grad = -(K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)*self.tau[:, None]#*self.dt
         self.bias.grad = -(K * self.elig_b).sum(axis=1).mean(dim=0) * self.dt
 
     def reset(self,):
@@ -99,7 +98,7 @@ class FwdDENeuronsReduced(FwdDENeurons):
         self.elig_b = self.decay_de[None, :, None] * self.elig_b + self.dt_tau_de[None, :, None]
         # Kernel propagation
         if learn and self.previous_layer is not None:  #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
-            self.previous_layer.K = (self.rho.d[:, None, :] * self.P * self.K) @ self.W_in
+            self.previous_layer.K = (self.P * self.K) @ self.W_in
         
         return 0, 0
 

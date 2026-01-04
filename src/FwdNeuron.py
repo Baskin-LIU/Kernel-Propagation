@@ -90,8 +90,6 @@ class FwdNeurons(Neurons):
         self.rho = RHO[activation](n_neurons, scale=self.scale)
         self.weight_init(W_in, bias)
 
-        
-
     def step(self, r_in, noise=0., **kwargs):
         self.r_in = r_in
         #update u and output
@@ -121,8 +119,8 @@ class FwdNeurons(Neurons):
         self.bias += self.epsilon.mean(0) * self.dt * self.lr_b
 
     def backwards(self, ):
-        dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.W_in.grad = -dW_in.clone()
+        #dW_in = -(self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
+        self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
         self.bias.grad = -self.epsilon.mean(0) * self.dt
 
     def weight_init(self, W_in, bias):

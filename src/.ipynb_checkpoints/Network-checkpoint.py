@@ -46,7 +46,8 @@ class FwdNetwork(torch.nn.Module):
         if layer is not None:
             return self.layers[layer].epsilon.clone().detach()
         else:
-            return [l.epsilon for l in self.layers]      
+            return [l.epsilon for l in self.layers] 
+            
     def learnW(self, layers=None):
         for i, l in enumerate(self.layers):
             l.learnW()
@@ -110,13 +111,10 @@ class DEFwdNetwork(FwdNetwork):
                 l.TauDE = self.Tau[:l.downstream]
                 l.dt_tau_de = l.dt/l.TauDE
                 l.decay_de = 1-l.dt_tau_de
-                #l.elig = torch.zeros(self.batch,l.downstream,l.n_neurons,l.n_in)
-                #l.elig_b = torch.zeros(self.batch, l.downstream, l.n_neurons)
             else:
                 break 
 
     def backwards(self, e_trg=0.):
-        self.layers[-1].E_trg(e_trg=e_trg)
         for l in reversed(self.layers):
             l.backwards()
 

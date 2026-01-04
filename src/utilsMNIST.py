@@ -48,13 +48,14 @@ default_model_config = {
     'n_out': 10, 
     'num_LP_layers': 4, 
     'num_Ins_layers': 1, 
-    'LP_size': (90, 80, 80, 90), 
-    'Ins_size': (60, 30), 
+    'LP_size': (60, 60, 60, 60), 
+    'Ins_size': (60, 60, 60), 
     'activation': 'tanh', 
-    'Tau0': (1, 120), 
-    'Tau1': np.array([1.2, 8. ]), 
-    'Tau2': np.array([1.3, 8.1]),
-    'Tau3': np.array([1.4, 8.2]),
+    'Tau0': (1, 160), 
+    'Tau1': np.array([1.1, 8. ]), 
+    'Tau2': np.array([1.2, 8.1]),
+    'Tau3': np.array([1.3, 8.2]),
+    'Tau4': np.array([1.4, 8.3]),
     }
 
 def buildMNISTNet(model_config, general_config):
@@ -85,7 +86,7 @@ def buildMNISTNet(model_config, general_config):
     #             )
     #     )
     #     prev_n=LP_size[i]
-
+    
     layers.append(
         FwdDENeurons(
             n_in=prev_n,
@@ -98,17 +99,43 @@ def buildMNISTNet(model_config, general_config):
     )
     prev_n=LP_size[0]
 
-    for i in range(model_config['num_LP_layers']-2):
-        layers.append(
-            FwdDENeuronsReduced(
-                n_in=prev_n,
-                n_neurons=LP_size[i+1],
-                tau=tau[i+1], 
-                activation="linear", 
-                dt=dt, 
-            )
+
+    # for i in range(model_config['num_LP_layers']-2):
+    #     layers.append(
+    #         FwdDENeuronsReduced(
+    #             n_in=prev_n,
+    #             n_neurons=LP_size[i+1],
+    #             tau=tau[i+1], 
+    #             activation="linear", 
+    #             dt=dt, 
+    #         )
+    #     )
+    #     prev_n=LP_size[i+1]
+    
+    layers.append(
+        FwdDENeurons(
+            n_in=prev_n,
+            n_neurons=LP_size[1],
+            tau=tau[1], 
+            activation=model_config["activation"], 
+            dt=dt, 
+            scale=0.6
         )
-        prev_n=LP_size[i+1]
+    )
+    prev_n=LP_size[1]
+
+    layers.append(
+        FwdDENeurons(
+            n_in=prev_n,
+            n_neurons=LP_size[2],
+            tau=tau[2], 
+            activation=model_config["activation"], 
+            dt=dt, 
+            scale=0.6
+        )
+    )
+    prev_n=LP_size[2]
+    i=1
 
     layers.append(
         LastFwdDENeurons(
@@ -167,6 +194,16 @@ def train_batch(model, optimizer, x, y, answer_period):
             total_error += -(one_hot_label * torch.log(p)).mean().item()
         else:
             model.prop(learn=False)
+    #     model.prop(learn=False)
+    # for t in range(answer_period):
+    #     r_out,_ = model.step(prex)
+    #     p = torch.softmax(r_out, dim=1)
+    #     error = (one_hot_label - p)/answer_period
+    #     model.prop(error=error)
+    #     model.backwards()
+    #     optimizer.step()
+    #     optimizer.zero_grad()
+    #     total_error += -(one_hot_label * torch.log(p)).mean().item()
             
             
     return total_error/answer_period
