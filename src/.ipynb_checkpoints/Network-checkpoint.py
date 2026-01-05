@@ -38,7 +38,7 @@ class FwdNetwork(torch.nn.Module):
     
     def prop(self, error=0., learn=True):
         self.layers[-1].E_trg(e_trg=self.beta*error)
-        for l in reversed(self.layers):
+        for l in reversed(self.layers[:]):
             l.prop(learn)
 
     
@@ -115,7 +115,7 @@ class DEFwdNetwork(FwdNetwork):
                 break 
 
     def backwards(self, e_trg=0.):
-        for l in reversed(self.layers):
+        for l in reversed(self.layers[:]):
             l.backwards()
 
 # class DENetwork_(FwdNetwork):

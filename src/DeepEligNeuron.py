@@ -61,7 +61,7 @@ class FwdDENeurons(FwdNeurons):
 
     def backwards(self, ):
         K = self.K[:,:self.downstream].clone()
-        self.W_in.grad = -(K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)*self.tau[:, None]#*self.dt
+        self.W_in.grad = -(K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)*self.dt#*self.tau[:, None]
         self.bias.grad = -(K * self.elig_b).sum(axis=1).mean(dim=0) * self.dt
 
     def reset(self,):
