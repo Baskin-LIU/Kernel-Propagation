@@ -16,11 +16,12 @@ class Neurons(torch.nn.Module):
         self.lr_b = lr_w*1e-1
         self.dt = dt
 
-        self.dt_tau = self.dt/self.tau
-        self.tau_dt = (self.tau/self.dt)
-        self.tau_dt[self.tau_dt==1] = 0.
-        self.decay = 1-self.dt_tau
-        assert (self.decay>=0).all()
+        dt_tau = self.dt/self.tau
+        decay = 1 - dt_tau
+        assert (decay>=0).all()
+        
+        self.register_buffer('dt_tau', dt_tau)
+        self.register_buffer('decay', decay)
 
         self.next_layer = None
         self.previous_layer = None
@@ -51,31 +52,37 @@ class Neurons(torch.nn.Module):
 
     def set_next_layer(self, nxt):
         if self.next_layer is None:
-            self.next_layer = nxt
+            self.next_layer = [nxt]
+        else:
+            self.next_layer.append(nxt)
 
     def set_previous_layer(self, previous):
         if self.previous_layer is None:
-            self.previous_layer = previous
+            self.previous_layer = [previous]
+        else:
+            self.previous_layer.append(previous)
         
     def reset(self, ):
-        self.u_bar *= 0
+        self.u_bar = torch.zeros(1, self.n_neurons).to(self.device)
+        self.wTe = torch.zeros(1, self.n_neurons).to(self.device)
         self.rho.reset()
 
     def _init_tau(self, tau):
         if type(tau) is tuple: #random initialize within the given range
             self.tau_min, self.tau_max = tau
-            self.tau= torch.rand(self.n_neurons)*(self.tau_max - self.tau_min) + self.tau_min
+            tau= torch.rand(self.n_neurons)*(self.tau_max - self.tau_min) + self.tau_min
         elif type(tau) is float or type(tau) is int: #scalar tau then apply same for all
-            self.tau= torch.tensor(tau).repeat(self.n_neurons)
+            tau= torch.tensor(tau).repeat(self.n_neurons)
         elif type(tau) is list: #assigned tau
-            self.tau= torch.tensor(tau)
+            tau= torch.tensor(tau)
         elif isinstance(tau, (np.ndarray, np.generic)):
-            self.tau= torch.tensor(tau, dtype=torch.float32)
+            tau= torch.tensor(tau, dtype=torch.float32)
         elif isinstance(tau, torch.Tensor): #assigned tau
-            self.tau= tau.clone()
+            tau= tau.clone()
         else:
             raise NotImplementedError
 
+        self.register_buffer('tau', tau)
         assert len(self.tau) == self.n_neurons
 
 
@@ -109,7 +116,7 @@ class FwdNeurons(Neurons):
     def prop(self, learn=True):
         self.epsilon = self.wTe * self.rho.d
         if learn and self.previous_layer is not None:
-            self.previous_layer.wTe = self.epsilon @ self.W_in
+            self.previous_layer[0].wTe = self.epsilon @ self.W_in
         return 0, 0
         
         
@@ -162,13 +169,16 @@ class FwdGLENeurons(FwdNeurons):
 
     def custom_init(self,):
         self.mismatch = torch.zeros(self.n_neurons)
+        tau_dt = (self.tau/self.dt)
+        tau_dt[tau_dt==1] = 0.
+        self.register_buffer('tau_dt', tau_dt)
 
     def prop(self,):
         self.epsilon_past = self.epsilon    
         self.epsilon = self.wTe * self.rho.d
         self.mismatch = self.epsilon + self.tau_dt[None,:]*(self.epsilon-self.epsilon_past)
         if self.previous_layer != None:
-            self.previous_layer.wTe = self.mismatch @ self.W_in
+            self.previous_layer[0].wTe = self.mismatch @ self.W_in
         return 0, 0
 
         

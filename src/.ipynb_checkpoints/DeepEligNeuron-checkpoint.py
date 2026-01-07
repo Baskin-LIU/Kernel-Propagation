@@ -13,7 +13,7 @@ class LastFwdDENeurons(FwdNeurons):
     def prop(self, learn=True):
         self.epsilon = self.rho.d * self.wTe
         if learn and self.previous_layer is not None:
-            self.previous_layer.K = (self.P * self.epsilon[:, None, :]) @ self.W_in
+            self.previous_layer[0].K = (self.P * self.epsilon[:, None, :]) @ self.W_in
         
         return 0, 0
 
@@ -29,8 +29,9 @@ class LastFwdDENeurons(FwdNeurons):
         self.bias.grad = -self.epsilon.mean(0) * self.dt
 
     def reset(self,):
-        self.u_bar = torch.zeros(1, self.n_neurons)
-        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in)
+        self.u_bar = torch.zeros(1, self.n_neurons).to(self.device)
+        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
+        self.wTe = torch.zeros(1, self.n_neurons).to(self.device)
         self.rho.reset()
         
 
@@ -49,7 +50,7 @@ class FwdDENeurons(FwdNeurons):
         # Kernel propagation
         if learn and self.previous_layer is not None:  
             #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
-            self.previous_layer.K = (self.rho.d[:, None, :] * self.P * self.K) @ self.W_in
+            self.previous_layer[0].K = (self.rho.d[:, None, :] * self.P * self.K) @ self.W_in
         
         return 0, 0
     
@@ -65,10 +66,10 @@ class FwdDENeurons(FwdNeurons):
         self.bias.grad = -(K * self.elig_b).sum(axis=1).mean(dim=0) * self.dt
 
     def reset(self,):
-        self.u_bar = torch.zeros(1, self.n_neurons)
-        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in)
-        self.elig = torch.zeros(1,self.downstream,self.n_neurons,self.n_in)
-        self.elig_b = torch.zeros(1, self.downstream, self.n_neurons)
+        self.u_bar = torch.zeros(1, self.n_neurons).to(self.device)
+        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
+        self.elig = torch.zeros(1,self.downstream,self.n_neurons,self.n_in).to(self.device)
+        self.elig_b = torch.zeros(1, self.downstream, self.n_neurons).to(self.device)
         self.rho.reset()
 
 
@@ -76,7 +77,8 @@ class FwdDENeurons(FwdNeurons):
 class FwdDENeuronsReduced(FwdDENeurons):
 
     def custom_init(self, ):
-        _, self.repeat_tau = torch.unique(self.tau, sorted=False, return_counts=True)
+        _, repeat_tau = torch.unique(self.tau, sorted=False, return_counts=True)
+        self.register_buffer("repeat_tau", repeat_tau)
 
     
     def step(self, r_in, noise=0., **kwargs):
@@ -98,16 +100,16 @@ class FwdDENeuronsReduced(FwdDENeurons):
         self.elig_b = self.decay_de[None, :, None] * self.elig_b + self.dt_tau_de[None, :, None]
         # Kernel propagation
         if learn and self.previous_layer is not None:  #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
-            self.previous_layer.K = (self.P * self.K) @ self.W_in
+            self.previous_layer[0].K = (self.P * self.K) @ self.W_in
         
         return 0, 0
 
     def reset(self,):
         #batch = self.batch if batch is None else batch
-        self.u_bar = torch.zeros(1, self.n_neurons)
-        self.r_bar_uniq = torch.zeros(1, self.n_tau, self.n_in)
-        self.elig_uniq = torch.zeros(1,self.downstream,self.n_tau,self.n_in)
-        self.elig_b = torch.zeros(1, self.downstream, 1)
+        self.u_bar = torch.zeros(1, self.n_neurons).to(self.device)
+        self.r_bar_uniq = torch.zeros(1, self.n_tau, self.n_in).to(self.device)
+        self.elig_uniq = torch.zeros(1,self.downstream,self.n_tau,self.n_in).to(self.device)
+        self.elig_b = torch.zeros(1, self.downstream, 1).to(self.device)
         self.rho.reset()
 
 
@@ -121,7 +123,7 @@ class FwdDEInsNeurons(FwdDENeurons):
 
         #Kernel Propagation
         if self.previous_layer != None:
-            self.previous_layer.B = self.W_in.T @ (self.rho.d[:, None] * self.T * self.B)
+            self.previous_layer[0].B = self.W_in.T @ (self.rho.d[:, None] * self.T * self.B)
         
         return 0, 0
 

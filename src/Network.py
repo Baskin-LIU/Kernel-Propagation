@@ -41,6 +41,10 @@ class FwdNetwork(torch.nn.Module):
         for l in reversed(self.layers[:]):
             l.prop(learn)
 
+    def backwards(self,):
+        for l in reversed(self.layers[:]):
+            l.backwards()
+
     
     def epsilon(self, layer=None):
         if layer is not None:
@@ -79,15 +83,15 @@ class DEFwdNetwork(FwdNetwork):
             if l.LP and l.previous_layer is not None:
                 tau_unique, inv = torch.unique(l.tau, sorted=False, return_inverse=True)
                 self.Tau.append(tau_unique)
-                l.tau_unique = tau_unique
                 n_tau = tau_unique.shape[0]
                 l.n_tau = n_tau
-                l.P = torch.zeros(l.n_neurons, n_tau)
-                l.P[torch.arange(l.n_neurons), inv] = 1.
+                l.P_ = torch.zeros(l.n_neurons, n_tau)
+                l.P_[torch.arange(l.n_neurons), inv] = 1.
                 totaln += n_tau
 
-                l.dt_tau_uniq = l.dt/l.tau_unique
-                l.decay_uniq = 1 - l.dt_tau_uniq
+                l.register_buffer("tau_unique", tau_unique)
+                l.register_buffer("dt_tau_uniq", l.dt/l.tau_unique)
+                l.register_buffer("decay_uniq", 1 - l.dt_tau_uniq)
 
         self.Tau = torch.hstack(self.Tau)
         assert self.Tau.numel() == torch.unique(self.Tau).numel() #forbid same tau in different layers
@@ -102,21 +106,18 @@ class DEFwdNetwork(FwdNetwork):
                 P = self.Tau[None, :] - l.tau[:, None]
                 P = torch.true_divide(self.Tau[None, :], P)
                 #for current layer tau
-                P[:, l.downstream:l.downstream+l.n_tau] = l.P
-                l.P = P.T
+                P[:, l.downstream:l.downstream+l.n_tau] = l.P_
+                del l.P_
+                l.register_buffer("P", P.T)
             else:
-                l.P = 1.
+                l.register_buffer("P", torch.tensor(1.))
             # init variables for tracing DeepE
             if l.downstream:
-                l.TauDE = self.Tau[:l.downstream]
-                l.dt_tau_de = l.dt/l.TauDE
-                l.decay_de = 1-l.dt_tau_de
+                l.register_buffer("TauDE", self.Tau[:l.downstream])
+                l.register_buffer("dt_tau_de", l.dt/l.TauDE)
+                l.register_buffer("decay_de", 1-l.dt_tau_de)
             else:
                 break 
-
-    def backwards(self, e_trg=0.):
-        for l in reversed(self.layers[:]):
-            l.backwards()
 
 # class DENetwork_(FwdNetwork):
 #     def __init__(self, net=None, layers=None, device="cpu", ):
