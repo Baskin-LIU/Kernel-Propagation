@@ -51,9 +51,10 @@ default_model_config = {
     'LP_size': (60, 60, 60, 60, 60), 
     'Ins_size': (60, 60, 60, 60), 
     'activation': 'tanh', 
-    'Tau0': (1, 120), 
-    'Tau1': np.array([1.1, 1.5 , 2.5 , 4.8 , 6. , 8., 10., 12., 16., 24]),#np.array([1.1, 4. , 4. , 4. , 9. , 9. ]), 
-    'Tau2': np.array([1.2, 1.7 , 2.2 , 5. , 6.4 , 8.5, 10.5, 13., 18., 26]),#np.array([1.2, 5.1, 5.1, 5.1, 8.1, 8.1]),
+    "reducedNonlinear": True,
+    'Tau0': (1, 20), 
+    'Tau1': np.array([0.6, 4. , 4. , 4. , 9. , 9. ]), #np.array([0.6, 1.5 , 2.5 , 4.8 , 8., 10., 12., 16., 24, 42]),#
+    'Tau2': np.array([0.5, 5.1, 5.1, 5.1, 8.1, 8.1]),#np.array([0.5, 1.2 , 2.2 , 6.4, 10.5, 18.]),#
     'Tau3': np.array([1.3, 2.9, 3.6, 4.5, 6.2, 7.2]),
     'Tau4': np.array([1.4, 3.3, 3.3, 3.3, 8.3, 8.3]),
     }
@@ -65,7 +66,8 @@ def buildMNISTNet(model_config, general_config):
     dt = general_config['dt']
     tau = []
     tau_min, tau_max = model_config['Tau0']
-    tau.append(np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0], dtype=np.float32))
+    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//3, dtype=np.float32)
+    tau.append(np.repeat(tau0[:, None], 3))
     for i in range(model_config['num_LP_layers']-1):
         tau_uniq = model_config['Tau%d'%(i+1)]
         tau.append(np.repeat(tau_uniq[:, None],
@@ -86,33 +88,33 @@ def buildMNISTNet(model_config, general_config):
     )
     prev_n=LP_size[0]
 
-
-    for i in range(model_config['num_LP_layers']-2):
-        layers.append(
-            FwdDENeuronsReduced(
-                n_in=prev_n,
-                n_neurons=LP_size[i+1],
-                tau=tau[i+1], 
-                activation="linear", 
-                dt=dt, 
-                device=device,
+    if model_config["reducedNonlinear"]:
+        for i in range(model_config['num_LP_layers']-2):
+            layers.append(
+                FwdDENeuronsReduced(
+                    n_in=prev_n,
+                    n_neurons=LP_size[i+1],
+                    tau=tau[i+1], 
+                    activation="linear", 
+                    dt=dt, 
+                    device=device,
+                )
             )
-        )
-        prev_n=LP_size[i+1]
-
-    # for i in range(model_config['num_LP_layers']-2):
-    #     layers.append(
-    #         FwdDENeurons(
-    #             n_in=prev_n,
-    #             n_neurons=LP_size[i+1],
-    #             tau=tau[i+1], 
-    #             activation=model_config["activation"], 
-    #             dt=dt, 
-    #             scale=0.5,
-    #             device=device,
-    #         )
-    #     )
-    #     prev_n=LP_size[i+1]
+            prev_n=LP_size[i+1]
+    else:
+        for i in range(model_config['num_LP_layers']-2):
+            layers.append(
+                FwdDENeurons(
+                    n_in=prev_n,
+                    n_neurons=LP_size[i+1],
+                    tau=tau[i+1], 
+                    activation=model_config["activation"], 
+                    dt=dt, 
+                    scale=0.4,
+                    device=device,
+                )
+            )
+            prev_n=LP_size[i+1]
 
     layers.append(
         LastFwdDENeurons(
@@ -131,7 +133,7 @@ def buildMNISTNet(model_config, general_config):
             FwdInsNeurons(
                 n_in=prev_n,
                 n_neurons=Ins_size[i],
-                activation='relu', #model_config["activation"], 
+                activation=model_config["activation"], 
                 scale=1.0,
                 dt=dt,
                 device=device,
