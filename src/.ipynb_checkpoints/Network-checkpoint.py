@@ -39,7 +39,7 @@ class FwdNetwork(torch.nn.Module):
     def prop(self, error=0., learn=True):
         self.layers[-1].E_trg(e_trg=self.beta*error)
         for l in reversed(self.layers[:]):
-            l.prop(learn)
+            l.prop(learn=learn)
 
     def backwards(self,):
         for l in reversed(self.layers[:]):
@@ -94,6 +94,7 @@ class DEFwdNetwork(FwdNetwork):
                 l.register_buffer("decay_uniq", 1 - l.dt_tau_uniq)
 
         self.Tau = torch.hstack(self.Tau)
+        print(self.Tau)
         assert self.Tau.numel() == torch.unique(self.Tau).numel() #forbid same tau in different layers
         #unlock by the path?
         self.totalN = totaln
@@ -118,52 +119,3 @@ class DEFwdNetwork(FwdNetwork):
                 l.register_buffer("decay_de", 1-l.dt_tau_de)
             else:
                 break 
-
-# class DENetwork_(FwdNetwork):
-#     def __init__(self, net=None, layers=None, device="cpu", ):
-#         super().__init__(net, layers, device)
-#         self.initKP()
-
-#     def initKP(self, ):
-#     #initial T and mask for sequential network. Network with recurrrent or skip connection should be redefined.
-#         #Collect all tau in network
-#         self.Tau = []
-#         totaln = 0
-#         for l in reversed(self.layers):
-#             l.downstream = totaln
-#             if l.LP and l.previous_layer is not None:
-#                 tau_unique, inv = torch.unique(l.tau, sorted=False, return_inverse=True)
-#                 self.Tau.append(tau_unique)
-#                 l.tau_unique = tau_unique
-#                 n_tau = tau_unique.shape[0]
-#                 l.n_tau = n_tau
-#                 l.T = torch.zeros(l.n_neurons, n_tau)
-#                 l.T[torch.arange(l.n_neurons), inv] = 1.
-#                 totaln += n_tau
-
-#         self.Tau = torch.hstack(self.Tau)
-#         assert self.Tau.numel() == torch.unique(self.Tau).numel() #should not have same tau in different layers
-#         #unlock by the path?
-#         self.totalN = totaln
-
-#         #Initial T
-#         n_=0
-#         for l in self.layers:
-#             l.totalN = self.totalN
-#             if l.LP and l.previous_layer is not None:
-#                 T = self.Tau[None, :] - l.tau[:, None]
-#                 T = torch.true_divide(self.Tau[None, :], T)
-#                 #for current layer tau
-#                 T[:, l.downstream:l.downstream+l.n_tau] = l.T
-#                 l.T = T
-#             else:
-#                 l.T = 1.
-#             # init variables for tracing DeepE
-#             if l.downstream:
-#                 l.TauDE = self.Tau[:l.downstream]
-#                 l.dt_tau_de = l.dt/l.TauDE
-#                 l.decay_de = 1-l.dt_tau_de
-#                 l.elig = torch.zeros(l.n_neurons, l.downstream, l.n_in)
-#                 l.elig_b = torch.zeros(l.n_neurons, l.downstream)
-#             else:
-#                 break

@@ -126,7 +126,6 @@ class FwdNeurons(Neurons):
         self.bias += self.epsilon.mean(0) * self.dt * self.lr_b
 
     def backwards(self, ):
-        #dW_in = -(self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
         self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
         self.bias.grad = -self.epsilon.mean(0) * self.dt
 
@@ -173,7 +172,7 @@ class FwdGLENeurons(FwdNeurons):
         tau_dt[tau_dt==1] = 0.
         self.register_buffer('tau_dt', tau_dt)
 
-    def prop(self,):
+    def prop(self, **kwargs):
         self.epsilon_past = self.epsilon    
         self.epsilon = self.wTe * self.rho.d
         self.mismatch = self.epsilon + self.tau_dt[None,:]*(self.epsilon-self.epsilon_past)
@@ -187,6 +186,13 @@ class FwdGLENeurons(FwdNeurons):
         self.W_in += dW_in * self.dt * self.lr_w
         self.bias += self.mismatch.mean(0) * self.dt * self.lr_b
 
+    def backwards(self, ):
+        self.W_in.grad = -(self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
+        self.bias.grad = -self.mismatch.mean(0) * self.dt
+
+    def reset(self,):
+        self.epsilon_past = torch.zeros(1, self.n_neurons)
+
         
 
 class FwdRFNeurons(FwdNeurons):
@@ -199,16 +205,19 @@ class FwdRFNeurons(FwdNeurons):
         self.step_bar(r_in, noise)
         return self.r, self.u_bar
     
-    def prop(self,):
+    def prop(self, **kwargs):
         super().prop()
         self.r_bar = self.decay[None, :, None] * self.r_bar + self.dt_tau[None, :, None] * self.r_in[:, None, :]
         return 0, 0
         
-
     def learnW(self,):
         dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
         self.W_in += dW_in * self.dt * self.lr_w
         self.bias += self.epsilon.mean(0) * self.dt * self.lr_b
+
+    def backwards(self, ):
+        self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(dim=0)
+        self.bias.grad = -self.epsilon.mean(0) * self.dt
 
     def reset(self,):
         self.u_bar = torch.zeros(1, self.n_neurons)
@@ -234,65 +243,4 @@ class FwdMulNeurons(FwdNeurons):
             self.previous_layer[i].wTe = wTe[n_:n_+n]
             n_ += n
         return err, dP
-
-
-
-class FwdDEL2Neurons(Neurons):
-    
-    def __init__(self, n_in, n_neurons, W_in=None, tau=20., lr_w = 1e-2, beta=0.1,
-                 activation='linear', dt=1., device="cpu", bias=False):
-        super().__init__(n_in, n_neurons, bias, activation, tau, lr_w, beta, dt, device)
-
-        self.rho = RHO[activation](n_neurons, scale=0.8)
-        # init weight from last layer / input
-        self.W_in = torch.nn.Parameter(torch.randn(n_neurons, n_in), requires_grad=False
-                                      ) if W_in is None else torch.nn.Parameter(W_in, requires_grad=False)
-
-        self.r_bar = torch.zeros(self.n_neurons, self.n_in) #r_in_bar
-        self.elig = torch.zeros(self.n_neurons, self.n_in)
-        self.decay = 1-self.dt_tau
-        self.dt_tau_de = torch.ones(self.n_neurons)
-        self.epsilon_inst = torch.zeros(self.n_neurons)
-        self.epsilon_lpf = torch.zeros(self.n_neurons)
-        self.epsilon_lpf_bar = torch.zeros(self.n_neurons)
-        self.epsilon_lpf_past = torch.zeros(self.n_neurons)
-        self.epsilon_lpf_dot = torch.zeros(self.n_neurons)
-
-    def step(self, r_in, noise=0.):
-        self.r_in=r_in
-        self.r_bar = self.decay.unsqueeze(1)*self.r_bar + torch.outer(self.dt_tau, self.r_in)
-
-        #update u and output
-        self.u_d = (self.W_in * self.r_in).sum(dim=1)
-
-        if self.previous_layer != None:
-            self.previous_layer.wTe = self.W_in.T @ self.mismatch
-
-        self.u_bar = self.u_bar + self.dt_tau*(- self.u_bar + self.u_d) + noise
-        self.r = self.rho(self.u_bar)
-
-        return self.r, self.u_bar
-
-    def prop(self, e_trg=0.):  
-        self.mismatch = self.epsilon_inst = self.wTe
-        self.epsilon_lpf_bar = self.decay*self.epsilon_lpf_bar + self.dt_tau * self.epsilon_lpf
-        
-        if self.previous_layer != None:
-            self.previous_layer.wTe = self.W_in.T @ (self.rho.d*self.dt_tau*self.epsilon_inst)
-            self.previous_layer.epsilon_lpf = self.W_in.T @ (self.rho.d*self.epsilon_lpf_bar)
-
-        self.epsilon_lpf_dot = self.epsilon_lpf - self.epsilon_lpf_past
-        if ((self.epsilon_inst - self.epsilon_lpf) != 0).all():
-            #self.dt_tau_de = (self.epsilon_lpf_dot/(self.epsilon_inst - self.epsilon_lpf))
-            self.dt_tau_de = torch.clamp((self.epsilon_inst - self.epsilon_lpf_dot)/self.epsilon_lpf, 0, 1)
-        
-        self.elig = (1-self.dt_tau_de.unsqueeze(1))*self.elig + self.rho.d.unsqueeze(1) * self.r_bar # *self.A
-        self.epsilon_lpf_past = self.epsilon_lpf
-        return 0, 0
-
-    def learnW(self,):
-        dW_in = self.mismatch.unsqueeze(dim=1) * self.elig
-        self.W_in += dW_in * self.dt * self.lr_w
-        if self.bias: # how is bias being lpf ？？？？？？？？
-            self.b += self.mismatch * self.dt * self.lr_w  * 0.5
 
