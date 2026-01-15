@@ -45,6 +45,9 @@ class FwdNetwork(torch.nn.Module):
         for l in reversed(self.layers[:]):
             l.backwards()
 
+    def backwardsRL(self, delta):
+        for l in reversed(self.layers[:]):
+            l.backwardsRL(delta)
     
     def epsilon(self, layer=None):
         if layer is not None:

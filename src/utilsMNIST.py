@@ -53,8 +53,8 @@ default_model_config = {
     'activation': 'tanh', 
     "reducedNonlinear": False,
     'Tau0': (1, 6), 
-    'Tau1': np.array([0.6, 1.1 , 1.1 , 2.1 , 2.1 , 2.1]), #np.array([0.6, 4. , 4. , 4. , 9. , 9.]),#
-    'Tau2': np.array([0.5, 2.4, 2.4, 4.2, 4.2, 12.]),#np.array([0.5, 5.1, 5.1, 5.1, 8.1, 8.1]),#
+    'Tau1': np.array([0.5, 2. , 2. , 2. , 3., 3.]), 
+    'Tau2': np.array([0.7, 1.1, 1.1, 1.1, 4.4, 4.4, 8.4, 12.4]),
     'Tau3': np.array([0.5, 2.4, 2.4, 4.2, 4.2, 12.]),
     'Tau4': np.array([1.4, 3.3, 3.3, 3.3, 8.3, 8.3]),
     }
@@ -116,16 +116,16 @@ def buildMNISTNet(model_config, general_config):
             )
             prev_n=LP_size[i+1]
 
-    layers.append(
-        FwdDENeuronsReduced(
-            n_in=prev_n,
-            n_neurons=prev_n,
-            tau=tau[i+1]+0.1, 
-            activation="linear", 
-            dt=dt, 
-            device=device,
-        )
-    )
+    # layers.append(
+    #     FwdDENeuronsReduced(
+    #         n_in=prev_n,
+    #         n_neurons=prev_n,
+    #         tau=tau[i+1]+0.1, 
+    #         activation="linear", 
+    #         dt=dt, 
+    #         device=device,
+    #     )
+    # )
 
     layers.append(
         LastFwdDENeurons(

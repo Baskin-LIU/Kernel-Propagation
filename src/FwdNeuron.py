@@ -144,6 +144,9 @@ class FwdNeurons(Neurons):
             self.bias = torch.nn.Parameter(bias)
         else:
             self.bias = torch.nn.Parameter(torch.randn(self.n_neurons)/10.)
+
+        self.W_in.grad = torch.zeros(self.n_neurons, self.n_in)
+        self.bias.grad = torch.zeros(self.n_neurons)
         
 
         

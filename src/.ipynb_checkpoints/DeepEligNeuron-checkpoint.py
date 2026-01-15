@@ -23,10 +23,18 @@ class LastFwdDENeurons(FwdNeurons):
         self.W_in += dW_in * self.dt * self.lr_w
         self.bias += self.epsilon.mean(0) * self.dt * self.lr_b
         
-
     def backwards(self, ):
-        self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
-        self.bias.grad = -self.epsilon.mean(0) * self.dt
+        self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+        self.bias.grad -= self.epsilon.mean(0) * self.dt
+
+    
+    def backwardsRL(self, delta, gamma, labd):
+        self.eligRL = 0
+        self.eligbiasRL = 0
+        self.eligRL = gamma * labd * self.eligRL - (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+        self.eligbiasRL = gamma * labd * self.eligbiasRL - self.epsilon.mean(0) * self.dt
+        self.W_in.grad = self.eligRL * delta
+        self.bias.grad = self.eligbiasRL * delta
 
     def reset(self,):
         self.u_bar = torch.zeros(1, self.n_neurons).to(self.device)
