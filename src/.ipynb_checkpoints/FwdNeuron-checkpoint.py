@@ -122,12 +122,12 @@ class FwdNeurons(Neurons):
         
     def learnW(self,):    
         dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.W_in += dW_in * self.dt * self.lr_w
-        self.bias += self.epsilon.mean(0) * self.dt * self.lr_b
+        self.W_in += dW_in * self.lr_w
+        self.bias += self.epsilon.mean(0) * self.lr_b
 
     def backwards(self, ):
         self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.bias.grad = -self.epsilon.mean(0) * self.dt
+        self.bias.grad = -self.epsilon.mean(0)
 
     def weight_init(self, W_in, bias):
         # init weight from last layer / input
@@ -186,14 +186,15 @@ class FwdGLENeurons(FwdNeurons):
         
     def learnW(self,):
         dW_in = (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
-        self.W_in += dW_in * self.dt * self.lr_w
-        self.bias += self.mismatch.mean(0) * self.dt * self.lr_b
+        self.W_in += dW_in * self.lr_w
+        self.bias += self.mismatch.mean(0) * self.lr_b
 
     def backwards(self, ):
         self.W_in.grad = -(self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.bias.grad = -self.mismatch.mean(0) * self.dt
+        self.bias.grad = -self.mismatch.mean(0)
 
     def reset(self,):
+        super().reset()
         self.epsilon_past = torch.zeros(1, self.n_neurons)
 
         
@@ -215,17 +216,16 @@ class FwdRFNeurons(FwdNeurons):
         
     def learnW(self,):
         dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
-        self.W_in += dW_in * self.dt * self.lr_w
-        self.bias += self.epsilon.mean(0) * self.dt * self.lr_b
+        self.W_in += dW_in * self.lr_w
+        self.bias += self.epsilon.mean(0) * self.lr_b
 
     def backwards(self, ):
         self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(dim=0)
-        self.bias.grad = -self.epsilon.mean(0) * self.dt
+        self.bias.grad = -self.epsilon.mean(0)
 
     def reset(self,):
-        self.u_bar = torch.zeros(1, self.n_neurons)
+        super().reset()
         self.r_bar = torch.zeros(1, self.n_neurons, self.n_in)
-        self.rho.reset()
 
 
         

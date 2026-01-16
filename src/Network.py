@@ -4,10 +4,11 @@ from DeepEligNeuron import *
 
 class FwdNetwork(torch.nn.Module):
 
-    def __init__(self, net=None, layers=None, beta=1., device="cpu"):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
         super().__init__()
         self.device=device
         self.beta=beta
+        self.dt = dt
         if net is None:
             self.layers = layers
         else: # initial from other network. layer is the class to use.
@@ -37,7 +38,7 @@ class FwdNetwork(torch.nn.Module):
 
     
     def prop(self, error=0., learn=True):
-        self.layers[-1].E_trg(e_trg=self.beta*error)
+        self.layers[-1].E_trg(e_trg=self.beta*error*self.dt)
         for l in reversed(self.layers[:]):
             l.prop(learn=learn)
 
@@ -45,9 +46,9 @@ class FwdNetwork(torch.nn.Module):
         for l in reversed(self.layers[:]):
             l.backwards()
 
-    def backwardsRL(self, delta):
-        for l in reversed(self.layers[:]):
-            l.backwardsRL(delta)
+    def backwardsRL(self, delta, gamma, labd=1.):
+        for l in reversed(self.layers):
+            l.backwardsRL(delta, gamma, labd)
     
     def epsilon(self, layer=None):
         if layer is not None:
@@ -72,8 +73,8 @@ class FwdNetwork(torch.nn.Module):
             l.u_bar *= 0.
 
 class DEFwdNetwork(FwdNetwork):
-    def __init__(self, net=None, layers=None, beta=1., device="cpu"):
-        super().__init__(net, layers, beta, device)
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net, layers, beta, dt, device)
         self.initKP()
 
     def initKP(self, ):

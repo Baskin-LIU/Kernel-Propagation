@@ -8,6 +8,7 @@ from inputFuc import *
 from utils import *
 from plotting import *
 
+START_TIME = 4
 
 ### DEFAULT Config ####
 default_general_config = {
@@ -172,7 +173,7 @@ def train_batch(model, optimizer, x, y, answer_period, beta):
     one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
     prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(6):
+    for t in range(START_TIME):
         r_out,_ = model.step(prex)
         model.prop(learn=False)
     for t in range(n_steps):
@@ -180,10 +181,10 @@ def train_batch(model, optimizer, x, y, answer_period, beta):
         if n_steps-t <= answer_period:
             p = torch.softmax(r_out, dim=1)
             error = (one_hot_label - p)*beta[t]#/answer_period
+            optimizer.zero_grad(set_to_none=False)
             model.prop(error=error)
             model.backwards()
             optimizer.step()
-            optimizer.zero_grad()
             total_error += -(one_hot_label * torch.log(p+1e-7)).mean().item()
         else:
             model.prop(learn=False)
@@ -197,7 +198,7 @@ def test(model, x_test, y_test, answer_period, beta):
     with torch.no_grad():
         model.reset()
         prex = torch.zeros(test_size, 1).to(model.device)
-        for t in range(6):
+        for t in range(START_TIME):
             r_out,_ = model.step(prex)
         pred = torch.zeros(test_size, 10).to(model.device)
         for t in range(n_steps):
@@ -295,4 +296,4 @@ def buildMNISTNetCompare(model_config, general_config, neurontype='GLE'):
             )
     )
     
-    return FwdNetwork(layers=layers, device=device)
+    return FwdNetwork(layers=layers, dt=dt, device=device)

@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 from FwdNeuron import *
 from DeepEligNeuron import *
+from RLNeuron import *
 from Network import *
 from inputFuc import *
 from utils import *
@@ -25,7 +26,8 @@ default_data_config = {
 
 default_train_config = {
     'num_epochs': 100, 
-    'learning_rate': 5e-4, 
+    'learning_rate_actor': 1e-4, 
+    'learning_rate_critic': 1e-3, 
     'batch_size': 40, 
     'num_workers': 4, 
     'num_prefetch_batch': 2,
@@ -36,12 +38,12 @@ default_model_config = {
     'n_out': 3, 
     'num_LP_layers': 3, 
     'num_Ins_layers': 1, 
-    'LP_size': (60, 60, 60), 
-    'Ins_size': (60, ), 
+    'LP_size': (90, 90, 90), 
+    'Ins_size': (60, 60), 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': (1, 6), 
-    'Tau1': np.array([2. , 2. , 2. , 3., 3.]), 
+    'Tau0': (1, 4), 
+    'Tau1': np.array([0.5 , 0.6 , 1.0 , 1.0, 1.5]), 
     'Tau2': np.array([1.1, 1.1, 1.1, 2.4, 2.4]),
 }
 
@@ -97,7 +99,7 @@ def buildRLNet(model_config, general_config):
     prev_n=model_config['n_in']
     
     layers.append(
-        FwdDENeurons(
+        FwdDERLNeurons(
             n_in=prev_n,
             n_neurons=LP_size[0],
             tau=tau[0], 
@@ -110,33 +112,21 @@ def buildRLNet(model_config, general_config):
     prev_n=LP_size[0]
 
     for i in range(model_config['num_LP_layers']-2):
-        if model_config["reducedNonlinear"]:   
-            layers.append(
-                FwdDENeuronsReduced(
-                    n_in=prev_n,
-                    n_neurons=LP_size[i+1],
-                    tau=tau[i+1], 
-                    activation="linear", 
-                    dt=dt, 
-                    device=device,
-                )
+        layers.append(
+            FwdDERLNeurons(
+                n_in=prev_n,
+                n_neurons=LP_size[i+1],
+                tau=tau[i+1], 
+                activation=model_config["activation"], 
+                dt=dt, 
+                scale=0.4,
+                device=device,
             )
-            prev_n=LP_size[i+1]
-        else:
-            layers.append(
-                FwdDENeurons(
-                    n_in=prev_n,
-                    n_neurons=LP_size[i+1],
-                    tau=tau[i+1], 
-                    activation=model_config["activation"], 
-                    dt=dt, 
-                    scale=0.4,
-                    device=device,
-                )
-            )
-            prev_n=LP_size[i+1]
+        )
+        prev_n=LP_size[i+1]
+
     layers.append(
-        LastFwdDENeurons(
+        LastFwdDERLNeurons(
             n_in=prev_n, 
             n_neurons=LP_size[model_config['num_LP_layers']-1], 
             tau=tau[model_config['num_LP_layers']-1], 
@@ -149,7 +139,7 @@ def buildRLNet(model_config, general_config):
     prev_n=LP_size[model_config['num_LP_layers']-1]
     for i in range(model_config['num_Ins_layers']):
         layers.append(
-            FwdInsNeurons(
+            FwdInsRLNeurons(
                 n_in=prev_n,
                 n_neurons=Ins_size[i],
                 activation=model_config["activation"], 
@@ -161,7 +151,7 @@ def buildRLNet(model_config, general_config):
         prev_n=Ins_size[i]
                 
     layers.append(
-        FwdInsNeurons(
+        FwdInsRLNeurons(
             n_in=prev_n, 
             n_neurons=model_config['n_out'],
             activation='linear', 
@@ -171,6 +161,6 @@ def buildRLNet(model_config, general_config):
             )
     )
     
-    return DEFwdNetwork(layers=layers, device=device)
+    return DEFwdNetwork(layers=layers, dt=dt, device=device)
 
 
