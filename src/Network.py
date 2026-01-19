@@ -1,6 +1,6 @@
 import torch
-from FwdNeuron import *
-from DeepEligNeuron import *
+from Neurons.FwdNeuron import *
+from Neurons.DeepEligNeuron import *
 
 class FwdNetwork(torch.nn.Module):
 

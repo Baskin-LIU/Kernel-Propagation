@@ -1,6 +1,5 @@
-from rho import *
-import numpy as np
 import torch
+from .rho import *
 
 class Neurons(torch.nn.Module):
 
@@ -126,8 +125,8 @@ class FwdNeurons(Neurons):
         self.bias += self.epsilon.mean(0) * self.lr_b
 
     def backwards(self, ):
-        self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.bias.grad = -self.epsilon.mean(0)
+        self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
+        self.bias.grad -= self.epsilon.mean(0)
 
     def weight_init(self, W_in, bias):
         # init weight from last layer / input

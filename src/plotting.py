@@ -3,7 +3,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 plt.style.use('seaborn-v0_8-white')
-mpl.rcParams['font.sans-serif'] = 'Arial'
+#mpl.rcParams['font.sans-serif'] = 'Arial'
 mpl.rcParams['font.size'] = 8
 mpl.rcParams['axes.linewidth'] = 1
 mpl.rcParams['xtick.major.width'] = 1

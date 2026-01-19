@@ -1,7 +1,6 @@
-from rho import *
-from FwdNeuron import *
-import numpy as np
 import torch
+from .FwdNeuron import *
+from .rho import *
     
 class LastFwdDENeurons(FwdNeurons):
     # last layer of LP neurons before inst output to save computation
@@ -58,8 +57,8 @@ class FwdDENeurons(FwdNeurons):
 
     def backwards(self, ):
         K = self.K[:,:self.downstream].clone()
-        self.W_in.grad = -(K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)
-        self.bias.grad = -(K * self.elig_b).sum(axis=1).mean(dim=0)
+        self.W_in.grad -= (K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)
+        self.bias.grad -= (K * self.elig_b).sum(axis=1).mean(dim=0)
 
     def reset(self,):
         super().reset()

@@ -2,13 +2,10 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
-from FwdNeuron import *
-from DeepEligNeuron import *
-from RLNeuron import *
+from Neurons.FwdNeuron import *
+from Neurons.DeepEligNeuron import *
+from Neurons.RLNeuron import *
 from Network import *
-from inputFuc import *
-from utils import *
-from plotting import *
 
 ### DEFAULT Config ####
 default_general_config = {

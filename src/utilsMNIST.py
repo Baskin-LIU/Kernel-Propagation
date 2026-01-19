@@ -1,14 +1,10 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from FwdNeuron import *
-from DeepEligNeuron import *
+from Neurons.FwdNeuron import *
+from Neurons.DeepEligNeuron import *
 from Network import *
 from inputFuc import *
-from utils import *
-from plotting import *
-
-START_TIME = 4
 
 ### DEFAULT Config ####
 default_general_config = {
@@ -29,6 +25,7 @@ default_data_config = {
     'iid_noise_scale': 2e-2,
     'shear_scale': 0.75,
     'shuffle_seq': False,
+    'duration': 72, #ms
     'final_seq_length': 72,
     'seed': 42,
     'url': 'https://github.com/greydanus/mnist1d/raw/master/mnist1d_data.pkl',
@@ -55,7 +52,7 @@ default_model_config = {
     "reducedNonlinear": False,
     'Tau0': (1, 6), 
     'Tau1': np.array([0.5, 2. , 2. , 2. , 3., 3.]), 
-    'Tau2': np.array([0.7, 1.1, 1.1, 1.1, 4.4, 4.4, 8.4, 12.4]),
+    'Tau2': np.array([0.7, 1.1, 1.1, 1.1, 4.4, 12.4]),
     'Tau3': np.array([0.5, 2.4, 2.4, 4.2, 4.2, 12.]),
     'Tau4': np.array([1.4, 3.3, 3.3, 3.3, 8.3, 8.3]),
     }
@@ -167,18 +164,18 @@ def buildMNISTNet(model_config, general_config):
     return DEFwdNetwork(layers=layers, device=device)
 
 
-def train_batch(model, optimizer, x, y, answer_period, beta):
+def train_batch(model, optimizer, x, y, answer_step, start_step, beta):
     n_steps = x.shape[1]
     total_error = 0.
     one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
     prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(START_TIME):
+    for t in range(start_step):
         r_out,_ = model.step(prex)
         model.prop(learn=False)
     for t in range(n_steps):
         r_out,_ = model.step(x[:, t])
-        if n_steps-t <= answer_period:
+        if n_steps-t <= answer_step:
             p = torch.softmax(r_out, dim=1)
             error = (one_hot_label - p)*beta[t]#/answer_period
             optimizer.zero_grad(set_to_none=False)
@@ -190,23 +187,46 @@ def train_batch(model, optimizer, x, y, answer_period, beta):
             model.prop(learn=False)
             
             
-    return total_error/answer_period
+    return total_error/answer_step
+
+def train_batch_delay(model, optimizer, x, y, answer_step, start_step, beta):
+    n_steps = x.shape[1]
+    total_error = 0.
+    one_hot_label = F.one_hot(y, num_classes=10)
+    model.reset()
+    optimizer.zero_grad(set_to_none=False)
+    prex = torch.zeros(x.shape[0], 1).to(model.device)
+    for t in range(start_step):
+        r_out,_ = model.step(prex)
+        model.prop(learn=False)
+    for t in range(n_steps):
+        r_out,_ = model.step(x[:, t])
+        if n_steps-t <= answer_step:
+            p = torch.softmax(r_out, dim=1)
+            error = (one_hot_label - p)*beta[t]
+            model.prop(error=error)
+            model.backwards()
+            total_error += -(one_hot_label * torch.log(p+1e-7)).mean().item()
+        else:
+            model.prop(learn=False)
+    optimizer.step()
+            
+    return total_error/answer_step
 
 
-def test(model, x_test, y_test, answer_period, beta):
+def test(model, x_test, y_test, answer_step, start_step, beta):
     test_size, n_steps, _ = x_test.shape
     with torch.no_grad():
         model.reset()
         prex = torch.zeros(test_size, 1).to(model.device)
-        for t in range(START_TIME):
+        for t in range(start_step):
             r_out,_ = model.step(prex)
         pred = torch.zeros(test_size, 10).to(model.device)
         for t in range(n_steps):
             r_out,_ = model.step(x_test[:, t])
-            if n_steps-t <= answer_period:
+            if n_steps-t <= answer_step:
                 p = torch.softmax(r_out, dim=1)
                 pred += p*beta[t]
-        #pred /= answer_period
         prediction = torch.argmax(pred, dim=1)
         one_hot_label = F.one_hot(y_test, num_classes=10)
         loss = -(one_hot_label * torch.log(pred)).mean().item()
