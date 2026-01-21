@@ -10,7 +10,7 @@ from Network import *
 ### DEFAULT Config ####
 default_general_config = {
     'seed': 0, 
-    'dt': 0.5, 
+    'dt': 5, 
     'device': 'cpu', 
     'short_training_run': False,
     }
@@ -25,7 +25,7 @@ default_train_config = {
     'num_epochs': 100, 
     'learning_rate_actor': 1e-4, 
     'learning_rate_critic': 1e-3, 
-    'batch_size': 40, 
+    'batch_size': 1, 
     'num_workers': 4, 
     'num_prefetch_batch': 2,
     }
@@ -35,43 +35,38 @@ default_model_config = {
     'n_out': 3, 
     'num_LP_layers': 3, 
     'num_Ins_layers': 1, 
-    'LP_size': (90, 90, 90), 
-    'Ins_size': (60, 60), 
+    'LP_size': (32, 50, 60), 
+    'Ins_size': (60, 30), 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': (1, 4), 
-    'Tau1': np.array([0.5 , 0.6 , 1.0 , 1.0, 1.5]), 
-    'Tau2': np.array([1.1, 1.1, 1.1, 2.4, 2.4]),
+    'Tau0': (5, 40, 4), 
+    'Tau1': np.array([5 , 5 , 10 , 10, 10]), 
+    'Tau2': np.array([11, 11, 11, 24, 24]),
 }
 
 class CartPoleCustomize(gym.Wrapper):
-    def __init__(self, switch_step=200, new_masspole=0.2):
-        env = gym.make("CartPole-v1")
+    def __init__(self, display=False):
+        # step size 20 ms
+        if display:
+            env = gym.make("CartPole-v1", render_mode="rgb_array")
+        else:
+            env = gym.make("CartPole-v1")
         super().__init__(env)
-        self.switch_step = switch_step
-        self.new_masspole = new_masspole
-        self.obs_mask = [0, 2]
-        self.t = 0
+        self.obs_mask = [1, 3]
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
-        self.t = 0
-        self._set_masspole(0.1)
+        self.set_masspole(0.1)
         return torch.tensor(obs[self.obs_mask])[None, :], info
 
     def step(self, action):
-        self.t += 1
-        if self.t == self.switch_step:
-            self._set_masspole(self.new_masspole)
         obs, reward, done, truncated, info = self.env.step(action)
-
+        reward = reward - np.abs(obs[2]).sum() - 0.08*np.abs(obs[0]).sum()
         obs = torch.tensor(obs[self.obs_mask])[None, :]
-        reward = reward - torch.abs(obs[:, 1]).sum().item()
 
         return obs, reward, done, truncated, info
 
-    def _set_masspole(self, m):
-        return
+    def set_masspole(self, m):
         env = self.env.unwrapped
         env.masspole = m
         env.total_mass = env.masspole + env.masscart
@@ -85,9 +80,9 @@ def buildRLNet(model_config, general_config):
     Ins_size = list(model_config['Ins_size'])
     dt = general_config['dt']
     tau = []
-    tau_min, tau_max = model_config['Tau0']
-    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//3, dtype=np.float32)
-    tau.append(np.repeat(tau0[:, None], 3))
+    tau_min, tau_max, repeat = model_config['Tau0']
+    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//repeat, dtype=np.float32)
+    tau.append(np.repeat(tau0[:, None], repeat))
     for i in range(model_config['num_LP_layers']-1):
         tau_uniq = model_config['Tau%d'%(i+1)]
         tau.append(np.repeat(tau_uniq[:, None],
@@ -116,7 +111,7 @@ def buildRLNet(model_config, general_config):
                 tau=tau[i+1], 
                 activation=model_config["activation"], 
                 dt=dt, 
-                scale=0.4,
+                scale=0.6,
                 device=device,
             )
         )
