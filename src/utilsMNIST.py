@@ -9,9 +9,10 @@ from inputFuc import *
 ### DEFAULT Config ####
 default_general_config = {
     'seed': 0, 
-    'dt': 0.5, 
+    'dt': 1., 
     'device': 'cpu', 
     'short_training_run': False,
+    'visual_kernel': False
     }
 
 default_data_config = {
@@ -25,20 +26,18 @@ default_data_config = {
     'iid_noise_scale': 2e-2,
     'shear_scale': 0.75,
     'shuffle_seq': False,
-    'duration': 72, #ms
-    'final_seq_length': 72,
+    'duration': 360, #ms
+    'final_seq_length': 360,
     'seed': 42,
     'url': 'https://github.com/greydanus/mnist1d/raw/master/mnist1d_data.pkl',
-    'duration': 72,
-    'pad': 1,      
+    'prepad': 20,      
     }
 
 default_train_config = {
     'num_epochs': 100, 
-    'learning_rate': 1e-4, 
-    'batch_size': 40, 
-    'num_workers': 4, 
-    'num_prefetch_batch': 2,
+    'learning_rate': 1e-2, 
+    'batch_size': 100, 
+    "answer_period":300,
     }
 
 default_model_config = {
@@ -46,15 +45,13 @@ default_model_config = {
     'n_out': 10, 
     'num_LP_layers': 3, 
     'num_Ins_layers': 1, 
-    'LP_size': (60, 60, 60, 60, 60), 
-    'Ins_size': (60, 60, 60, 60), 
+    'LP_size': (64, 96, 96), 
+    'Ins_size': (150, ), 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': (1, 6), 
-    'Tau1': np.array([0.5, 2. , 2. , 2. , 3., 3.]), 
-    'Tau2': np.array([0.7, 1.1, 1.1, 1.1, 4.4, 12.4]),
-    'Tau3': np.array([0.5, 2.4, 2.4, 4.2, 4.2, 12.]),
-    'Tau4': np.array([1.4, 3.3, 3.3, 3.3, 8.3, 8.3]),
+    'Tau0': (1, 20, 2), 
+    'Tau1': (2, 6., 6., 6., 16., 16.), 
+    'Tau2': (1, 8., 8., 8., 32., 32.),
     }
 
 def buildMNISTNet(model_config, general_config):
@@ -63,11 +60,11 @@ def buildMNISTNet(model_config, general_config):
     Ins_size = list(model_config['Ins_size'])
     dt = general_config['dt']
     tau = []
-    tau_min, tau_max = model_config['Tau0']
-    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//3, dtype=np.float32)
-    tau.append(np.repeat(tau0[:, None], 3))
+    tau_min, tau_max, repeat = model_config['Tau0']
+    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//repeat, dtype=np.float32)
+    tau.append(np.repeat(tau0[:, None], repeat))
     for i in range(model_config['num_LP_layers']-1):
-        tau_uniq = model_config['Tau%d'%(i+1)]
+        tau_uniq = np.array(model_config['Tau%d'%(i+1)])
         tau.append(np.repeat(tau_uniq[:, None],
                                           LP_size[i+1]//tau_uniq.shape[0]))
     layers = torch.nn.ModuleList()
@@ -80,7 +77,7 @@ def buildMNISTNet(model_config, general_config):
             tau=tau[0], 
             activation=model_config["activation"], 
             dt=dt, 
-            scale=1.,
+            scale=1.0,
             device=device,
         )
     )
@@ -108,7 +105,7 @@ def buildMNISTNet(model_config, general_config):
                     tau=tau[i+1], 
                     activation=model_config["activation"], 
                     dt=dt, 
-                    scale=0.4,
+                    scale=0.9,
                     device=device,
                 )
             )
@@ -132,7 +129,7 @@ def buildMNISTNet(model_config, general_config):
             tau=tau[i+2], 
             activation=model_config["activation"], 
             dt=dt, 
-            scale=1.,
+            scale=1.0,
             device=device,
             )
     )
@@ -164,13 +161,13 @@ def buildMNISTNet(model_config, general_config):
     return DEFwdNetwork(layers=layers, device=device)
 
 
-def train_batch(model, optimizer, x, y, answer_step, start_step, beta):
+def train_batch(model, optimizer, x, y, answer_step, pad_steps, beta):
     n_steps = x.shape[1]
-    total_error = 0.
+    avg_p = 0.
     one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
     prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(start_step):
+    for t in range(pad_steps):
         r_out,_ = model.step(prex)
         model.prop(learn=False)
     for t in range(n_steps):
@@ -182,21 +179,22 @@ def train_batch(model, optimizer, x, y, answer_step, start_step, beta):
             model.prop(error=error)
             model.backwards()
             optimizer.step()
-            total_error += -(one_hot_label * torch.log(p+1e-7)).mean().item()
+            avg_p = p + avg_p
         else:
             model.prop(learn=False)
+    avg_p /= answer_step
+    total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
             
-            
-    return total_error/answer_step
+    return total_loss
 
-def train_batch_delay(model, optimizer, x, y, answer_step, start_step, beta):
+def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
     n_steps = x.shape[1]
-    total_error = 0.
+    avg_p = 0.
     one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
     optimizer.zero_grad(set_to_none=False)
     prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(start_step):
+    for t in range(pad_steps):
         r_out,_ = model.step(prex)
         model.prop(learn=False)
     for t in range(n_steps):
@@ -206,12 +204,15 @@ def train_batch_delay(model, optimizer, x, y, answer_step, start_step, beta):
             error = (one_hot_label - p)*beta[t]
             model.prop(error=error)
             model.backwards()
-            total_error += -(one_hot_label * torch.log(p+1e-7)).mean().item()
+            avg_p = p + avg_p
         else:
             model.prop(learn=False)
     optimizer.step()
+
+    avg_p /= answer_step
+    total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
             
-    return total_error/answer_step
+    return total_loss
 
 
 def test(model, x_test, y_test, answer_step, start_step, beta):
@@ -221,17 +222,18 @@ def test(model, x_test, y_test, answer_step, start_step, beta):
         prex = torch.zeros(test_size, 1).to(model.device)
         for t in range(start_step):
             r_out,_ = model.step(prex)
-        pred = torch.zeros(test_size, 10).to(model.device)
+        pred_p = torch.zeros(test_size, 10).to(model.device)
         for t in range(n_steps):
             r_out,_ = model.step(x_test[:, t])
             if n_steps-t <= answer_step:
                 p = torch.softmax(r_out, dim=1)
-                pred += p*beta[t]
-        prediction = torch.argmax(pred, dim=1)
+                pred_p += p*beta[t]
+        prediction = torch.argmax(pred_p, dim=1)
         one_hot_label = F.one_hot(y_test, num_classes=10)
-        loss = -(one_hot_label * torch.log(pred)).mean().item()
-        acc = ((prediction==y_test)*1.).mean().item()
-    return acc, loss
+        loss = -(one_hot_label * torch.log(pred_p)).mean().item()
+        acc_p = ((prediction==y_test)*1.).mean().item()*100
+
+    return acc_p, loss
 
 
 def extract_kernel(model, n_steps, layer_idx):

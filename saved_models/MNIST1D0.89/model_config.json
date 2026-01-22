@@ -1,0 +1,37 @@
+{
+    "Ins_size": [
+        150
+    ],
+    "LP_size": [
+        60,
+        90,
+        96
+    ],
+    "Tau0": [
+        1,
+        20,
+        2
+    ],
+    "Tau1": [
+        3,
+        6.0,
+        6.0,
+        6.0,
+        16.0,
+        16.0
+    ],
+    "Tau2": [
+        1,
+        8.0,
+        8.0,
+        8.0,
+        32.0,
+        32.0
+    ],
+    "activation": "tanh",
+    "n_in": 1,
+    "n_out": 10,
+    "num_Ins_layers": 1,
+    "num_LP_layers": 3,
+    "reducedNonlinear": false
+}
