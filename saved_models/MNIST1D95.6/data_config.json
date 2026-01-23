@@ -9,7 +9,7 @@
         36,
         60
     ],
-    "prepad": 20,
+    "prepad": 0,
     "scale_coeff": 0.4,
     "seed": 42,
     "shear_scale": 0.75,

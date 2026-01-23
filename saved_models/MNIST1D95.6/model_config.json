@@ -1,37 +1,36 @@
 {
     "Ins_size": [
-        150
+        120
     ],
     "LP_size": [
+        60,
         90,
-        96,
-        96
+        90,
+        90
     ],
     "Tau0": [
         1,
-        30,
-        3
+        10,
+        6
     ],
     "Tau1": [
-        2,
-        10.0,
-        10.0,
-        10.0,
-        16.0,
-        16.0
+        3,
+        6
     ],
     "Tau2": [
+        2,
+        7
+    ],
+    "Tau3": [
         1,
         8.0,
-        8.0,
-        8.0,
-        32.0,
-        32.0
+        12.0
     ],
     "activation": "tanh",
+    "answer_period": 360,
     "n_in": 1,
     "n_out": 10,
     "num_Ins_layers": 1,
-    "num_LP_layers": 3,
+    "num_LP_layers": 4,
     "reducedNonlinear": false
 }

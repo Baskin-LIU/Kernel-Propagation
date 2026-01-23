@@ -61,6 +61,7 @@ class FwdNetwork(torch.nn.Module):
             l.learnW()
 
     def reset(self, ):
+        self.zero_grad(set_to_none=False)
         for i, l in enumerate(self.layers):
             l.reset()
 

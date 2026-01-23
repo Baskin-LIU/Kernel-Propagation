@@ -10,6 +10,7 @@ import json
 import random
 import tempfile
 import shutil
+import copy
 from pathlib import Path
 from tqdm import tqdm
 
@@ -36,26 +37,28 @@ if __name__ == "__main__":
     
     ### Training config
     parser.add_argument("--lr", type=float, default=8e-3)
-    parser.add_argument("--num_epochs", type=int, default=75)
+    parser.add_argument("--num_epochs", type=int, default=150)
     parser.add_argument("--answer_t", type=int, default=300)
 
     ### Data config
-    parser.add_argument("--prepad", type=int, default=20)
+    parser.add_argument("--prepad", type=int, default=10)
     parser.add_argument("--batch", type=int, default=100)
     
     ### Model config
-    parser.add_argument("--num_LP_layers", type=int, default=3)
-    parser.add_argument("--num_Ins_layers", type=int, default=1)
-    parser.add_argument("--LP_size", type=tuple, default=(90, 96, 96))
-    parser.add_argument("--Ins_size", type=tuple, default=(150, ))
     parser.add_argument("--activation", type=str, default='tanh')
-    parser.add_argument("--Tau0", type=tuple, default=(1, 30, 3))
-    parser.add_argument("--Tau1", type=tuple, default=(2, 10., 10., 10., 16., 16.))
-    parser.add_argument("--Tau2", type=tuple, default=(1, 8., 8., 8., 32., 32.))
+    parser.add_argument("--num_LP_layers", type=int, default=4)
+    parser.add_argument("--num_Ins_layers", type=int, default=1)
+    parser.add_argument("--LP_size", type=int, nargs="+",
+        help="Hidden Low-pass layer sizes", default=[90, 90, 90, 90],)
+    parser.add_argument("--Ins_size", type=int, nargs="+", default=[120, ],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[1, 10, 6],)
+    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 6],)
+    parser.add_argument("--Tau2", type=int, nargs="+", default=[2, 7],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[1, 8., 12.],)
     
     parser.add_argument("--save_model", dest="save_model", action="store_true")
     
-    parser.set_defaults(short_run=False, visual_kernel=False, save_model=True)
+    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
     args = parser.parse_args()
 
@@ -90,25 +93,25 @@ if __name__ == "__main__":
     # Model Config
     model_config["num_LP_layers"] = args.num_LP_layers
     model_config["num_Ins_layers"] = args.num_Ins_layers
-    model_config["LP_size"] = args.LP_size
-    model_config["Ins_size"] = args.Ins_size
+    model_config["LP_size"] = args.LP_size[:args.num_LP_layers]
+    model_config["Ins_size"] = args.Ins_size[:args.num_Ins_layers]
     model_config["activation"] = args.activation
-    model_config["Tau0"] = args.Tau0
-    model_config["Tau1"] = args.Tau1
-    model_config["Tau2"] = args.Tau2
+    model_config["answer_period"] = args.answer_t
+    
+    for i in range(model_config["num_LP_layers"]):
+        model_config["Tau%d"%i] =getattr(args, "Tau%d"%i)
 
     # Training Config
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
     train_config["learning_rate"] = args.lr
     train_config["batch_size"] = args.batch
-    train_config["answer_period"] = args.answer_t
     
     # Dataset Config
     data_config["prepad"] = args.prepad
 
     dt = general_config["dt"]
     n_steps = data_config["final_seq_length"]
-    answer_steps = int(train_config["answer_period"]/dt)
+    answer_steps = int(model_config["answer_period"]/dt)
     pad_steps = int(data_config["prepad"]/dt)
     data_config["final_seq_length"] = int(data_config["duration"]/dt)
 
@@ -167,7 +170,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
-        factor=0.6,
+        factor=0.75,
         patience=2
     )
 
@@ -206,7 +209,7 @@ if __name__ == "__main__":
 
             if test_acc > best_test_acc:
                 best_test_acc = test_acc
-                best_model_state_dict = model.state_dict().copy()
+                best_model_state_dict = copy.deepcopy(model.state_dict())
 
             print(
                 f"Epoch: {epoch+1}, "
@@ -225,7 +228,7 @@ if __name__ == "__main__":
                     "test_acc": test_acc,
                 }
             )
-
+    wandb.log({"Best Test Acc": best_test_acc})
     # Free up memory
     gc.collect()
 
@@ -234,9 +237,9 @@ if __name__ == "__main__":
         best_model_state_dict, str(artefacts_dir / "best_model_state.pt")
     )
     
-    if args.save_model:
-        shutil.copytree(artefacts_dir, "..\saved_models\MNIST1D%.3f"%best_test_acc, dirs_exist_ok=True)
-        
+    if args.save_local:
+        print("Saved local at saved_models\MNIST1D%.1f"%best_test_acc)
+        shutil.copytree(artefacts_dir, Path("..") / "saved_models" / f"MNIST1D{best_test_acc:.1f}", dirs_exist_ok=True)
     
     # save artefacts to wandb
     wandb.save(

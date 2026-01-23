@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import numpy.random as random
 from collections import deque
+import torch.nn.functional as F
 
 class sin_function():
     def __init__(self, n, period, bias= 0., magnitude = 1., phase = 0., dt=1., rand_init=True, dtype = torch.float32):
@@ -284,3 +285,77 @@ class StepSumBi():
             self.binary_label = torch.tensor(list(map(int, f"{self.label:0{self.lenLabel}b}")))
 
         return torch.tensor([self.bit-0.5]), self.binary_label
+
+
+class NBack:
+    def __init__(
+        self,
+        N=4,
+        n_class=10,
+        show_time=10.0,
+        dt=1.0,
+        max_N=20,
+        dtype=torch.float32,
+        device="cpu",
+    ):
+        assert N <= max_N
+
+        self.N = N
+        self.n_class = n_class
+        self.show_time = show_time
+        self.dt = dt
+        self.max_N = max_N
+        self.dtype = dtype
+        self.device = device
+
+        self.show_steps = int(show_time / dt)
+
+        # memory stores class indices
+        self.memory = np.zeros(max_N, dtype=np.int64)
+
+        self.t = 0
+        self.current_symbol = None
+
+    def __call__(self):
+        # At symbol boundaries, sample a new class
+        if self.t % self.show_steps == 0:
+            new_symbol = random.randint(self.n_class)
+
+            # shift memory left, push new symbol
+            self.memory[:-1] = self.memory[1:]
+            self.memory[-1] = new_symbol
+
+            self.current_symbol = new_symbol
+
+        # input: one-hot of current symbol
+        x = F.one_hot(
+            torch.tensor(self.current_symbol, device=self.device),
+            num_classes=self.n_class,
+        ).to(self.dtype)
+
+        # target: symbol N steps back
+        target = torch.tensor(
+            self.memory[-(self.N + 1)],
+            dtype=torch.int64,
+            device=self.device,
+        )
+
+        self.t += 1
+        return x, target
+
+    def change_N(self, new_N):
+        assert 0 <= new_N <= self.max_N
+        self.N = new_N
+
+    def reset(self):
+        self.memory[:] = 0
+        self.t = 0
+        self.current_symbol = None
+
+
+
+
+
+
+
+        

@@ -30,28 +30,29 @@ default_data_config = {
     'final_seq_length': 360,
     'seed': 42,
     'url': 'https://github.com/greydanus/mnist1d/raw/master/mnist1d_data.pkl',
-    'prepad': 20,      
+    'prepad': 5,      
     }
 
 default_train_config = {
-    'num_epochs': 100, 
+    'num_epochs': 150, 
     'learning_rate': 1e-2, 
     'batch_size': 100, 
-    "answer_period":300,
     }
 
 default_model_config = {
     'n_in': 1, 
     'n_out': 10, 
-    'num_LP_layers': 3, 
+    'num_LP_layers': 4, 
     'num_Ins_layers': 1, 
-    'LP_size': (64, 96, 96), 
-    'Ins_size': (150, ), 
+    'LP_size': [60, 90, 90, 90], 
+    'Ins_size': [120, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': (1, 20, 2), 
-    'Tau1': (2, 6., 6., 6., 16., 16.), 
-    'Tau2': (1, 8., 8., 8., 32., 32.),
+    'Tau0': [1, 10, 6], 
+    'Tau1': [3, 6], 
+    'Tau2': [2, 7],
+    'Tau2': [1, 8.0, 12.0],
+    "answer_period":300,
     }
 
 def buildMNISTNet(model_config, general_config):
@@ -105,7 +106,7 @@ def buildMNISTNet(model_config, general_config):
                     tau=tau[i+1], 
                     activation=model_config["activation"], 
                     dt=dt, 
-                    scale=0.9,
+                    scale=0.6,
                     device=device,
                 )
             )
@@ -161,11 +162,12 @@ def buildMNISTNet(model_config, general_config):
     return DEFwdNetwork(layers=layers, device=device)
 
 
-def train_batch(model, optimizer, x, y, answer_step, pad_steps, beta):
+def train_batch(model, optimizer, x, y, answer_step, pad_steps, beta, update_period=10):
     n_steps = x.shape[1]
     avg_p = 0.
     one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
+    #optimizer.zero_grad(set_to_none=False)
     prex = torch.zeros(x.shape[0], 1).to(model.device)
     for t in range(pad_steps):
         r_out,_ = model.step(prex)
@@ -174,11 +176,12 @@ def train_batch(model, optimizer, x, y, answer_step, pad_steps, beta):
         r_out,_ = model.step(x[:, t])
         if n_steps-t <= answer_step:
             p = torch.softmax(r_out, dim=1)
-            error = (one_hot_label - p)*beta[t]#/answer_period
-            optimizer.zero_grad(set_to_none=False)
+            error = (one_hot_label - p)*beta[t]
             model.prop(error=error)
             model.backwards()
-            optimizer.step()
+            if t%update_period==0:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=False)
             avg_p = p + avg_p
         else:
             model.prop(learn=False)
@@ -192,7 +195,7 @@ def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
     avg_p = 0.
     one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
-    optimizer.zero_grad(set_to_none=False)
+    #optimizer.zero_grad(set_to_none=False)
     prex = torch.zeros(x.shape[0], 1).to(model.device)
     for t in range(pad_steps):
         r_out,_ = model.step(prex)
@@ -215,12 +218,12 @@ def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
     return total_loss
 
 
-def test(model, x_test, y_test, answer_step, start_step, beta):
+def test(model, x_test, y_test, answer_step, pad_steps, beta):
     test_size, n_steps, _ = x_test.shape
     with torch.no_grad():
         model.reset()
         prex = torch.zeros(test_size, 1).to(model.device)
-        for t in range(start_step):
+        for t in range(pad_steps):
             r_out,_ = model.step(prex)
         pred_p = torch.zeros(test_size, 10).to(model.device)
         for t in range(n_steps):
@@ -231,9 +234,33 @@ def test(model, x_test, y_test, answer_step, start_step, beta):
         prediction = torch.argmax(pred_p, dim=1)
         one_hot_label = F.one_hot(y_test, num_classes=10)
         loss = -(one_hot_label * torch.log(pred_p)).mean().item()
-        acc_p = ((prediction==y_test)*1.).mean().item()*100
+        acc_p = (prediction==y_test).sum().item()*100/test_size
 
     return acc_p, loss
+
+def test_mul(model, x_test, y_test, answer_step, pad_steps, beta):
+    test_size, n_steps, _ = x_test.shape
+    with torch.no_grad():
+        model.reset()
+        prex = torch.zeros(test_size, 1).to(model.device)
+        for t in range(pad_steps):
+            r_out,_ = model.step(prex)
+        pred_p = torch.zeros(test_size, 10).to(model.device)
+        pred_r = torch.zeros(test_size, 10).to(model.device)
+        pred_m = torch.zeros(test_size, 10).to(model.device)
+        for t in range(n_steps):
+            r_out,_ = model.step(x_test[:, t])
+            if n_steps-t <= answer_step:
+                p = torch.softmax(r_out, dim=1)
+                pred_r += r_out*beta[t]
+                pred_p += p*beta[t]
+                pred_m[torch.arange(test_size), torch.argmax(p, dim=1)] += beta[t]
+        prediction = torch.argmax(pred_p, dim=1)
+        acc_p = (prediction==y_test).sum().item()*100/test_size
+        acc_r = (torch.argmax(pred_r, dim=1)==y_test).sum().item()*100/test_size
+        acc_m = (torch.argmax(pred_m, dim=1)==y_test).sum().item()*100/test_size
+
+    return acc_p, acc_r, acc_m
 
 
 def extract_kernel(model, n_steps, layer_idx):
