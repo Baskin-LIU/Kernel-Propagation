@@ -1,273 +1,144 @@
+import torch
+from .FwdNeuron import *
+from .rho import *
+
 class RecNeurons(Neurons):
     
-    def __init__(self, n_in, n_neurons, n_a=None, u_rest=0., W_in=None, W_r=None, tau=20., 
-                 inh=0.1, num_P=1, lr_w = 1e-2, lr_p = 1e-1, beta=0.1,
-                 activation='linear', afunc='self', P_bias=False, dt=1., device="cpu",):
-        super().__init__(n_in, n_neurons, n_a, u_rest, tau, lr_w, lr_p, beta, dt, activation, afunc, device)
+    def __init__(self, n_in, n_neurons, W_in=None, bias=None, tau=20., 
+                 inh=0.1, lr_w=1e-2, activation='linear', dt=1., scale =1., device="cpu",):
+        super().__init__(n_in, n_neurons, bias, activation, tau, lr_w, dt, device)
         
         self.inh = inh
-        self.rho = RHO[activation](n_neurons)
-        # init weight from last layer / input
-        self.W_in = torch.nn.Parameter(torch.randn(n_neurons, n_in), requires_grad=False
-                                      ) if W_in is None else torch.nn.Parameter(W_in, requires_grad=False)
-
-        diagonal = torch.diag(-torch.rand(n_neurons))
-        Q = torch.randn(n_neurons, n_neurons)
-        W = Q @ diagonal @ torch.inverse(Q) - self.inh
-        self.W_r = torch.nn.Parameter(W, requires_grad=False
-                                     ) if W_r is None else torch.nn.Parameter(W_r, requires_grad=False)
-
-        # init error predition matrix
-        self.a = torch.zeros(self.n_neurons, self.n_a)
-        if P_bias:
-            self.a[:, -1] = 2.
-        self.a_last = self.a
-        self.num_P = num_P
-        self.P = torch.nn.Parameter(torch.zeros(self.num_P, self.n_neurons, self.n_a), requires_grad=False)
-        self.i = 0 ###task_index
-        
+        self.scale = scale
+        self.rho = RHO[activation](n_neurons, scale=self.scale)
+        self.weight_init(W_in, bias)
 
     def step(self, r_in, noise=0., **kwargs):
-        self.update_a_last()
-        self.update_a(self, **kwargs)
-        self.mismatch = (self.P[self.i] * self.a).sum(dim=1)
-
-        self.r_in=r_in
-        #update u and output
-        self.u_d = (self.W_in * self.r_in).sum(dim=1) + (self.W_r * self.r).sum(dim=1) + self.mismatch
-
-        if self.previous_layer != None:
-            self.previous_layer.wTe = self.W_in.T @ self.mismatch
-
-        self.u_bar = self.u_bar + self.dt_tau*(self.u_rest - self.u_bar + self.u_d) + noise
-        self.r = self.rho(self.u_bar)
-
-        return self.r, self.u_bar
-    
-
-    def learnP(self, e_trg=0, learning=True):
-            
-        self.epsilon = (self.W_r.T @ self.mismatch + self.wTe + self.beta * e_trg) * self.rho.d
-
-        a_hat = (1.-self.tau_dt) * self.a + self.tau_dt * self.a_last
-        Pa_hat = (self.P[self.i] * a_hat).sum(dim=1)
-
-        err = self.epsilon - Pa_hat
-        dP = err.unsqueeze(dim=1)*self.a_last
+        self.r_bar = self.decay[None, :, None] * self.r_bar + self.dt_tau[None, :, None] * torch.cat((r_in, self.r), 1)[:, None, :]
+        self.u_bar = (self.r_bar * self.W).sum(-1) + self.bias
         
-        self.P[self.i] += self.lr_p * dP * self.dt
+        self.r = self.rho(self.u_bar)
 
-        return err, dP
+        return self.r, self.u_bar
 
+    def learnW(self, update=True): 
+        self.W += self.dW_in * self.lr_w
+        self.bias += self.dbias * self.lr_b
+        self.dW_in = torch.zeros(self.W_in.shape).to(self.device)
+        self.dbias = torch.zeros(self.n_neurons).to(self.device)
 
-    def learnW(self):
-        dW_in = self.mismatch.unsqueeze(dim=1) * self.r_in
-        self.W_in += dW_in * self.dt * self.lr_norm()
+    def backwards(self, ):
+        self.W.grad -= self.dW
+        self.bias.grad -= self.dbias
 
-        dW_r = self.mismatch.unsqueeze(dim=1) * self.r
-        self.W_r += dW_r * self.dt * self.lr_norm()
+    def reset(self,):
+        super().reset()
+        self.r_bar = torch.zeros(1, self.n_neurons, 1).to(self.device)
 
-class RecGLENeurons(Neurons):
-    
-    def __init__(self, n_in, n_neurons, n_a=None, u_rest=0., W_in=None, W_r=None, tau=20., lr_w = 1e-2, lr_p = 1e-1, beta=0.1,
-                 activation='linear', afunc='inp', dt=1., device="cpu",):
-        super().__init__(n_in, n_neurons, n_a, u_rest, tau, lr_w, lr_p, beta, dt, activation, afunc, device)
-
-        if W_r is None:
-            diagonal = torch.diag(-torch.rand(n_neurons))
-            Q = torch.randn(n_neurons, n_neurons)
-            W = Q @ diagonal @ torch.inverse(Q) - self.inh
-            self.W_r = torch.nn.Parameter(W, requires_grad=False)
-        else:
-            self.W_r = torch.nn.Parameter(W_r, requires_grad=False)
-
-        self.rho = RHO[activation](n_neurons)
+    def weight_init(self, W, bias, sparse=False):
         # init weight from last layer / input
-        self.W_in = torch.nn.Parameter(torch.randn(n_neurons, n_in), requires_grad=False
-                                      ) if W_in is None else torch.nn.Parameter(W_in, requires_grad=False)        
+        if W is not None:
+            self.W = torch.nn.Parameter(W)
+        else:
+            W_inp = torch.empty(self.n_neurons, self.n_in)
+            torch.nn.init.kaiming_normal_(W_inp, mode="fan_in", nonlinearity=self.activation)
+            W_rec = torch.empty(self.n_neurons, self.n_neurons)
+            if sparse:
+                p, g = 0.08, 1.2
+                N = W_rec.size(0)
+                k = p * N
+                mask = (torch.rand_like(W_rec) < p).float()
+                W_rec.data.normal_(0.0, g/k**0.5)
+                W_rec.data *= mask
+                eigvals = torch.linalg.eigvals(W_rec)
+                rho = eigvals.abs().max()
+                W_rec *= (2 / rho)
+            else:
+                torch.nn.init.orthogonal_(W_rec, gain=2.)
+            
+            self.W = torch.nn.Parameter(torch.cat((W_inp, W_rec), 1))
 
-    def step(self, r_in, noise=0.):
-        self.r_in=r_in
-        #update u and output
-        self.u_d = (self.W_in * self.r_in).sum(dim=1) + (self.W_r * self.r).sum(dim=1) + self.mismatch
+        if bias is not None:
+            self.bias = torch.nn.Parameter(bias)
+        else:
+            self.bias = torch.empty(self.n_neurons)
+            fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.W)
+            bound = 1 / fan_in**0.5
+            torch.nn.init.uniform_(self.bias, -bound, bound)
 
-        if self.previous_layer != None:
-            self.previous_layer.wTe = self.W_in.T @ self.mismatch
+        # diagonal = torch.diag(-torch.rand(n_neurons))
+        # Q = torch.randn(n_neurons, n_neurons)
+        # W = Q @ diagonal @ torch.inverse(Q) - self.inh
+        
+        self.W_in = self.W ## Just for reference
 
-        self.u_bar = self.u_bar + self.dt_tau*(self.u_rest - self.u_bar + self.u_d) + noise
+        self.W.grad = torch.zeros(self.n_neurons, self.n_in+self.n_neurons)
+        self.bias.grad = torch.zeros(self.n_neurons)
+
+
+class RecDENeurons(RecNeurons):
+
+    def custom_init(self,):
+        tau_unique, inv = torch.unique(self.tau, sorted=False, return_inverse=True)
+        n_tau = tau_unique.shape[0]
+        self.n_tau = n_tau
+        P = torch.zeros(self.n_neurons, n_tau)
+        P[torch.arange(self.n_neurons), inv] = 1.
+        self.register_buffer("P", P.T)
+        self.register_buffer("TauDE", tau_unique)
+        self.register_buffer("dt_tau_de", self.dt/tau_unique)
+        self.register_buffer("decay_de", 1-self.dt_tau_de)
+
+    def prop(self, learn=True):
+        self.epsilon = self.rho.d * self.wTe
+        if learn:
+            self.dW_in += (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+            self.dbias += self.epsilon.mean(0)
+            K = (self.P[None, :, :] * self.epsilon[:, None, :]) @ self.W[:, self.n_in:]
+            self.dW_in += (K.unsqueeze(-1) * self.elig).sum(1).mean(0)
+            self.dbias += (K * self.elig_b).sum(1).mean(0)
+        # Update input eligibility trace (batch, n_exp, n_neuron, n_in+n_neuron)
+        self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:,None,None] * (self.rho.d[:,None,:,None] * self.r_bar[:,None,:,:])
+        # Bias eligibility (batch, n_exp, n_neuron)
+        self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
+        
+        return 0, 0
+
+    def reset(self,):
+        super().reset()
+        self.elig = torch.zeros(1,self.n_tau,self.n_neurons,self.n_in+self.n_neurons).to(self.device)
+        self.elig_b = torch.zeros(1,self.n_tau, self.n_neurons).to(self.device)
+
+
+class RecRFNeurons(RecNeurons):
+
+    def prop(self, learn=True):
+        self.epsilon = self.rho.d * self.wTe
+        
+        if learn:
+            self.dW_in += (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+            self.dbias += self.epsilon.mean(0)
+        
+        return 0, 0
+        
+
+class RecGLENeurons(RecNeurons):        
+
+    def step(self, r_in, noise=0., **kwargs):
+        self.r_bar = self.decay[None, :, None] * self.r_bar + self.dt_tau[None, :, None] * torch.cat((r_in, self.r), 1)[:, None, :]
+        self.u_bar = (self.r_bar * self.W).sum(-1) + self.bias
+        
         self.r = self.rho(self.u_bar)
 
         return self.r, self.u_bar
     
 
-    def learnP(self, e_trg=0, learning=True):
-        self.epsilon_past = self.epsilon    
-        self.epsilon = (self.W_r.T @ self.mismatch + self.wTe + self.beta * e_trg) * self.rho.d
-
+    def prop(self, learn=True):
+        self.epsilon_past = self.epsilon  
+        self.epsilon = (self.W_r.T @ self.mismatch + self.wTe) * self.rho.d
+        #epsilon breve
         self.mismatch = self.epsilon + self.tau_dt.squeeze(1)*(self.epsilon-self.epsilon_past)
 
-        self.mismatch *= self.lr_norm()
-        return 0, 0
-
-    def learnW(self):
-        dW_in = self.mismatch.unsqueeze(dim=1) * self.r_in
-        self.W_in += dW_in * self.dt * self.lr_w
-
-        dW_r = self.mismatch.unsqueeze(dim=1) * self.r
-        self.W_r += dW_r * self.dt * self.lr_w
-
-
-class RecLENeurons(Neurons):
-    
-    def __init__(self, n_in, n_neurons, n_a=None, u_rest=0., W_in=None, W_r=None, tau=20., lr_w = 1e-2, lr_p = 1e-1, beta=0.1,
-                 activation='linear', afunc='inp', dt=1., device="cpu", inh=0.1):
-        super().__init__(n_in, n_neurons, n_a, u_rest, tau, lr_w, lr_p, beta, dt, activation, afunc, device)
-        self.inh=inh/self.n_neurons
-        if W_r is None:
-            diagonal = torch.diag(-torch.rand(n_neurons))
-            Q = torch.randn(n_neurons, n_neurons)
-            W = Q @ diagonal @ torch.inverse(Q) - self.inh
-    
-            self.W_r = torch.nn.Parameter(W, requires_grad=False)
-        else:
-            self.W_r = torch.nn.Parameter(W_r, requires_grad=False)
-
-        self.rho = RHO[activation](n_neurons)
-        # init weight from last layer / input
-        self.W_in = torch.nn.Parameter(torch.randn(n_neurons, n_in), requires_grad=False
-                                      ) if W_in is None else torch.nn.Parameter(W_in, requires_grad=False)
-        
-
-    def step(self, r_in, noise=0.):
-        self.r_in=r_in
-        #update u and output
-        self.u_d = (self.W_in * self.r_in).sum(dim=1) + (self.W_r * self.r).sum(dim=1) + self.mismatch
-
-        if self.previous_layer != None:
-            self.previous_layer.wTe = self.W_in.T @ self.mismatch
-
-        self.u_bar = self.u_bar + self.dt_tau*(self.u_rest - self.u_bar + self.u_d) + noise
-        self.r = self.rho(self.u_bar)
-
-        return self.r, self.u_bar
-    
-    def learnP(self, e_trg=0, learning=True):  
-        self.epsilon = (self.W_r.T @ self.mismatch + self.wTe + self.beta * e_trg) * self.rho.d
-        self.mismatch = self.epsilon
-        return 0, 0
-
-    def learnW(self):
-        dW_in = self.mismatch.unsqueeze(dim=1) * self.r_in
-        self.W_in += dW_in * self.dt*self.lr_w
-
-        dW_r = self.mismatch.unsqueeze(dim=1) * self.r
-        self.W_r += dW_r * self.dt*self.lr_w
-        
-
-class RecEPNeurons(Neurons):
-    
-    def __init__(self, n_in, n_neurons, n_a=None, u_rest=0., W_in=None, W_r=None, tau=20., lr_w = 1e-2, lr_p = 1e-1, beta=0.1,
-                 activation='linear', afunc='inp', P_bias=False, dt=1., device="cpu", inh=0.1):
-        super().__init__(n_in, n_neurons, n_a, u_rest, tau, lr_w, lr_p, beta, dt, activation, afunc, device)
-        self.inh=inh/self.n_neurons
-        if W_r is None:
-            diagonal = torch.diag(-torch.rand(n_neurons))
-            Q = torch.randn(n_neurons, n_neurons)
-            W = Q @ diagonal @ torch.inverse(Q) - self.inh
-            W /= 0.6*self.n_neurons*torch.abs(W).mean()
-    
-            self.W_r = torch.nn.Parameter(W, requires_grad=False)
-        else:
-            self.W_r = torch.nn.Parameter(W_r, requires_grad=False)
-
-        self.rho = RHO[activation](n_neurons)
-        # init weight from last layer / input
-        self.W_in = torch.nn.Parameter(torch.randn(n_neurons, n_in), requires_grad=False
-                                      ) if W_in is None else torch.nn.Parameter(W_in, requires_grad=False)
-        self.W_in /= self.n_in*torch.abs(self.W_in).mean()
-        self.elig = torch.zeros(self.n_neurons, self.n_in) #r_in_bar
-        self.elig_r = torch.zeros(self.n_neurons, self.n_neurons) #r_bar
-        
-
-    def step(self, r_in, noise=0.):
-        self.r_in=r_in
-    
-        #update u and output
-        self.u_d = (self.W_in * self.r_in).sum(dim=1) + (self.W_r * self.r).sum(dim=1) + self.b
-
-        if self.previous_layer != None:
-            self.previous_layer.wTe = self.W_in.T @ self.mismatch
-
-        self.u_bar = self.u_bar + self.dt_tau*(self.u_rest - self.u_bar + self.u_d) + noise
-        self.r = self.rho(self.u_bar)
-        
-        self.elig = (1-self.dt_tau.unsqueeze(1))*self.elig + torch.outer(self.dt_tau, self.r_in)
-        self.elig_r = (1-self.dt_tau.unsqueeze(1))*self.elig_r + torch.outer(self.dt_tau, self.r)
-
-        return self.r, self.u_bar
-    
-
-    def learnP(self, e_trg=0):  
-        self.epsilon = (self.wTe + self.beta * e_trg) * self.rho.d
-        self.mismatch = self.epsilon
-        return 0, 0
-
-    def learnW(self):
-        dW_in = self.mismatch.unsqueeze(dim=1) * self.elig
-        self.W_in += dW_in * self.dt * self.lr_w  #* self.lr_norm() #
-
-        dW_r = self.mismatch.unsqueeze(dim=1) * self.elig_r
-        self.W_r += dW_r * self.dt *self.lr_w #* self.lr_norm() #
-
-        if self.bias:
-            self.b += self.mismatch * self.dt * self.lr_w * 0.5
-
-
-class RecLEEPNeurons(RecEPNeurons):
-    
-    def learnP(self, e_trg=0, learning=True):
-        self.epsilon = (self.wTe + self.beta * e_trg) * self.rho.d
-        self.mismatch = self.epsilon + (self.W_r.T@self.epsilon*self.dt_tau)*self.rho.d # t+2
-        return 0, 0
-
-
-class RecLEEP1Neurons(RecEPNeurons):
-
-        
-    def learnP(self, e_trg=0):
-        self.epsilon = (self.wTe + self.beta * e_trg) * self.rho.d
-        self.mismatch = self.epsilon + (self.W_r.T@self.epsilon*self.dt_tau)*self.rho.d # t+2
-        self.mismatch = self.epsilon + (self.W_r.T@self.mismatch*self.dt_tau)*self.rho.d #t+1
-
-        return 0, 0
-    
-class RecLEEP2Neurons(RecEPNeurons):
-
-    def learnP(self, e_trg=0, learning=True):
-        self.epsilon = (self.wTe + self.beta * e_trg) * self.rho.d
-        self.mismatch = self.epsilon + (self.W_r.T@self.epsilon*self.dt_tau)*self.rho.d # t+3
-        self.mismatch = self.epsilon + (self.W_r.T@self.mismatch*self.dt_tau)*self.rho.d #t+2
-        self.mismatch = self.epsilon + (self.W_r.T@self.mismatch*self.dt_tau)*self.rho.d #t+1
-        
-        return 0, 0
-
-class RecLEEP3Neurons(RecEPNeurons):
-    def experimental_init(self,):
-        self.epsilon_past = torch.zeros(self.n_neurons)
-        self.epsilon_dot = torch.zeros(self.n_neurons)
-    
-    def learnP(self, e_trg=0):
-        #self.epsilon_past = self.epsilon    
-        self.epsilon = (self.wTe + self.beta * e_trg) * self.rho.d
-
-        self.mismatch = self.epsilon + self.W_r.T @ self.epsilon*self.dt_tau * self.rho.d
-
-        # self.epsilon_past = self.epsilon    
-        # self.epsilon = (self.W_r.T @ self.mismatch + self.wTe + self.beta * e_trg) * self.rho.d
-
-        # self.mismatch = (self.epsilon+(self.epsilon-self.epsilon_past))*self.dt_tau
-        
-        # self.epsilon = (self.W_r.T @ (self.mismatch*self.dt_tau+) 
-        #                 + self.wTe + self.beta * e_trg) * self.rho.d
-        # self.mismatch = self.epsilon
+        self.dW_in += (self.mismatch.unsqueeze(dim=-1) * self.r_bar).mean(0)
+        self.dbias += self.mismatch.mean(0)
         return 0, 0

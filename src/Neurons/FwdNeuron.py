@@ -48,7 +48,6 @@ class Neurons(torch.nn.Module):
     def step(self,):
         return
 
-
     def set_next_layer(self, nxt):
         if self.next_layer is None:
             self.next_layer = [nxt]
@@ -64,6 +63,8 @@ class Neurons(torch.nn.Module):
     def reset(self, ):
         self.u_bar = torch.zeros(1, self.n_neurons).to(self.device)
         self.wTe = torch.zeros(1, self.n_neurons).to(self.device)
+        self.dW_in = torch.zeros(self.W_in.shape).to(self.device)
+        self.dbias = torch.zeros(self.n_neurons).to(self.device)
         self.rho.reset()
 
     def _init_tau(self, tau):
@@ -119,10 +120,14 @@ class FwdNeurons(Neurons):
         return 0, 0
         
         
-    def learnW(self,):    
-        dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.W_in += dW_in * self.lr_w
-        self.bias += self.epsilon.mean(0) * self.lr_b
+    def learnW(self, update=True):    
+        self.dW_in += (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
+        self.dbias += self.epsilon.mean(0)
+        if update:
+            self.W_in += self.dW_in * self.lr_w
+            self.bias += self.dbias * self.lr_b
+            self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
+            self.dbias = torch.zeros(self.n_neurons).to(self.device)
 
     def backwards(self, ):
         self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
@@ -133,8 +138,6 @@ class FwdNeurons(Neurons):
         if W_in is not None:
             self.W_in = torch.nn.Parameter(W_in)
         else:
-            # W_in = torch.randn(self.n_neurons, self.n_in)
-            # W_in *= (2/(W_in**2).sum(dim=1, keepdim=True))**0.5
             W_in = torch.empty(self.n_neurons, self.n_in)
             torch.nn.init.kaiming_normal_(W_in, mode="fan_in", nonlinearity=self.activation)
             self.W_in = torch.nn.Parameter(W_in)
@@ -142,7 +145,11 @@ class FwdNeurons(Neurons):
         if bias is not None:
             self.bias = torch.nn.Parameter(bias)
         else:
-            self.bias = torch.nn.Parameter(torch.randn(self.n_neurons)/10.)
+            self.bias = torch.empty(self.n_neurons)
+            fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.W_in)
+            bound = 1 / fan_in**0.5
+            torch.nn.init.uniform_(self.bias, -bound, bound)
+            #self.bias = torch.nn.Parameter(torch.randn(self.n_neurons)/10.)
 
         self.W_in.grad = torch.zeros(self.n_neurons, self.n_in)
         self.bias.grad = torch.zeros(self.n_neurons)
@@ -183,7 +190,7 @@ class FwdGLENeurons(FwdNeurons):
         return 0, 0
 
         
-    def learnW(self,):
+    def learnW(self, update=True):
         dW_in = (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
         self.W_in += dW_in * self.lr_w
         self.bias += self.mismatch.mean(0) * self.lr_b
@@ -213,7 +220,7 @@ class FwdRFNeurons(FwdNeurons):
         self.r_bar = self.decay[None, :, None] * self.r_bar + self.dt_tau[None, :, None] * self.r_in[:, None, :]
         return 0, 0
         
-    def learnW(self,):
+    def learnW(self, update=True):
         dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
         self.W_in += dW_in * self.lr_w
         self.bias += self.epsilon.mean(0) * self.lr_b

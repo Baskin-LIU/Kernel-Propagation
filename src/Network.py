@@ -1,6 +1,7 @@
 import torch
 from Neurons.FwdNeuron import *
 from Neurons.DeepEligNeuron import *
+from Neurons.RecNeuron import *
 
 class FwdNetwork(torch.nn.Module):
 
@@ -56,9 +57,9 @@ class FwdNetwork(torch.nn.Module):
         else:
             return [l.epsilon for l in self.layers] 
             
-    def learnW(self, layers=None):
+    def learnW(self, update=True):
         for i, l in enumerate(self.layers):
-            l.learnW()
+            l.learnW(update)
 
     def reset(self, ):
         self.zero_grad(set_to_none=False)
