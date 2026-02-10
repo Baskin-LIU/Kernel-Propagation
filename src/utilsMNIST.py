@@ -51,7 +51,7 @@ default_model_config = {
     'Tau0': [1, 10, 6], 
     'Tau1': [3, 6], 
     'Tau2': [2, 7],
-    'Tau2': [1, 8.0, 12.0],
+    'Tau3': [1, 8.0, 12.0],
     "answer_period":300,
     }
 
@@ -239,6 +239,7 @@ def test(model, x_test, y_test, answer_step, pad_steps, beta):
     return acc_p, loss
 
 def test_mul(model, x_test, y_test, answer_step, pad_steps, beta):
+    #test differen ways to generate prediction
     test_size, n_steps, _ = x_test.shape
     with torch.no_grad():
         model.reset()
@@ -261,21 +262,6 @@ def test_mul(model, x_test, y_test, answer_step, pad_steps, beta):
         acc_m = (torch.argmax(pred_m, dim=1)==y_test).sum().item()*100/test_size
 
     return acc_p, acc_r, acc_m
-
-
-def extract_kernel(model, n_steps, layer_idx):
-    model.reset()
-    impulse = torch.zeros(1, n_steps, 1).to(model.device)
-    impulse[0] += 1
-    kernel_record = []
-    for t in range(n_steps):
-        r = impulse[:, t]
-        for l in model.layers[:layer_idx]:
-            r,u = l.step(r)
-        kernel_record.append(u.detach().clone())
-
-    return torch.vstack(kernel_record).cpu().numpy().T
-
 
 
 def buildMNISTNetCompare(model_config, general_config, neurontype='GLE'):
