@@ -3,12 +3,11 @@ from .FwdNeuron import *
 from .rho import *
     
 class LastFwdDENeurons(FwdNeurons):
-    # last layer of LP neurons before inst output to save computation
-        
-    def step(self, r_in, noise=0., **kwargs):
+    # last layer of LP neurons before inst output to save computation  
+    def step(self, r_in, noise=0.):
         self.step_bar(r_in, noise)
         return self.r, self.u_bar
-        
+
     def prop(self, learn=True):
         self.epsilon = self.rho.d * self.wTe
         if learn and self.previous_layer is not None:
@@ -24,7 +23,7 @@ class LastFwdDENeurons(FwdNeurons):
             self.bias += self.dbias * self.lr_b
             self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
-        
+
     def backwards(self, ):
         self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
         self.bias.grad -= self.epsilon.mean(0)
@@ -36,14 +35,15 @@ class LastFwdDENeurons(FwdNeurons):
 
 
 class FwdDENeurons(FwdNeurons):
-
-    def step(self, r_in, noise=0., **kwargs):
+    
+    def step(self, r_in, noise=0.):
         self.step_bar(r_in, noise)
         return self.r, self.u_bar
 
     def prop(self, learn=True):
         # Update eligibility trace (batch, n_exp, n_neuron, n_in)
-        self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:,None,None] * (self.rho.d[:,None,:,None] * self.r_bar[:,None,:,:])
+        self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:
+            ,None,None] * (self.rho.d[:,None,:,None] * self.r_bar[:,None,:,:])
         # Bias eligibility (batch, n_exp, n_neuron)
         self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
         # Kernel propagation

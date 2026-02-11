@@ -97,7 +97,7 @@ class FwdNeurons(Neurons):
         self.rho = RHO[activation](n_neurons, scale=self.scale)
         self.weight_init(W_in, bias)
 
-    def step(self, r_in, noise=0., **kwargs):
+    def step(self, r_in, noise=0.):
         self.r_in = r_in
         #update u and output
         self.u_d = self.r_in@self.W_in.T + self.bias
@@ -106,13 +106,12 @@ class FwdNeurons(Neurons):
 
         return self.r, self.u_bar
 
-    def step_bar(self, r_in, noise=0., **kwargs):
+    def step_bar(self, r_in, noise=0.):
         self.r_bar = self.decay[None, :, None] * self.r_bar + self.dt_tau[None, :, None] * r_in[:, None, :]
         self.u_bar = (self.r_bar*self.W_in).sum(-1) + self.bias
         
         self.r = self.rho(self.u_bar)
     
-
     def prop(self, learn=True):
         self.epsilon = self.wTe * self.rho.d
         if learn and self.previous_layer is not None:
@@ -128,7 +127,7 @@ class FwdNeurons(Neurons):
             self.bias += self.dbias * self.lr_b
             self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
-
+    
     def backwards(self, ):
         self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
         self.bias.grad -= self.epsilon.mean(0)
@@ -145,7 +144,7 @@ class FwdNeurons(Neurons):
         if bias is not None:
             self.bias = torch.nn.Parameter(bias)
         else:
-            self.bias = torch.empty(self.n_neurons)
+            self.bias = self.bias = torch.nn.Parameter(torch.empty(self.n_neurons))
             fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.W_in)
             bound = 1 / fan_in**0.5
             torch.nn.init.uniform_(self.bias, -bound, bound)
