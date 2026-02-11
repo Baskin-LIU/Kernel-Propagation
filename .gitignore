@@ -18,4 +18,4 @@ ipython_config.py
 wandb
 
 #data
-data/
+SpeechCommands/

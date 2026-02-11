@@ -54,7 +54,7 @@ default_model_config = {
 
 class SubsetSC(SPEECHCOMMANDS):
     def __init__(self, subset: str = None):
-        super().__init__("../data", download=True)
+        super().__init__("../", download=True)
 
         def load_list(filename):
             filepath = os.path.join(self._path, filename)
