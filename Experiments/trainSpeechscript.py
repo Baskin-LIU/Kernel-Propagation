@@ -160,21 +160,6 @@ if __name__ == "__main__":
     
     print("Shape of waveform: {}".format(waveform.size()))
     print("Sample rate of waveform: {}".format(sample_rate))
-
-    if data_config['preprocessing']=='Mel':
-        transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=data_config['sample_rate'],
-            n_fft=data_config['n_fft'],
-            win_length=data_config['win_length'],
-            hop_length=data_config['hop_length'],
-            n_mels=data_config['n_mels'],
-            center=True
-        )
-    elif data_config['preprocessing']=='Raw':
-        new_sample_rate = 10000
-        transform = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=new_sample_rate)
-
-    transformed = transform(waveform)[:, :, :-1]
     
     data_config["final_seq_length"] = transformed.shape[-1]
     data_config["n_class"] = len(labels)
@@ -253,14 +238,13 @@ if __name__ == "__main__":
                 disable=not general_config["verbose"],
             )
             for batch_idx, (x, target) in pbar:
-                x = transform(x.to(device))[:,0,:,:-1]
                 y = F.one_hot(target, num_classes=n_class).to(device)
-                total_error = train_batch_delay(model, optimizer, x,
+                total_error = train_batch_delay(model, optimizer, x.to(device),
                                                 y, answer_steps, beta)
                 Cum_errors += total_error
             Cum_errors /= len(train_loader.dataset)
     
-            val_acc, val_loss = test(model, val_loader, transform, n_class, 
+            val_acc, val_loss = test(model, val_loader, n_class, 
                                     answer_steps, beta)
             scheduler.step(val_loss)
     
@@ -308,7 +292,7 @@ if __name__ == "__main__":
     
     model.load_state_dict(best_model_state_dict)
 
-    test_acc, test_loss = test(model, test_loader, transform, n_class, 
+    test_acc, test_loss = test(model, test_loader, n_class, 
                                     answer_steps, beta)
     print(
                 f'Test Loss: {test_loss:.4f},'

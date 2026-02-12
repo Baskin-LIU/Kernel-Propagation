@@ -1,5 +1,178 @@
-import numpy as np
 import torch
+import torch.nn.functional as F
+import numpy as np
+from Neurons.FwdNeuron import *
+from Neurons.DeepEligNeuron import *
+from Network import *
+from inputFuc import *
+
+def buildKPNet(model_config, general_config):
+    device = general_config["device"]
+    LP_size = list(model_config['LP_size'])
+    Ins_size = list(model_config['Ins_size'])
+    dt = general_config['dt']
+    tau = []
+    tau_min, tau_max, repeat = model_config['Tau0']
+    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//repeat, dtype=np.float32)
+    tau.append(np.repeat(tau0[:, None], repeat))
+    for i in range(model_config['num_LP_layers']-1):
+        tau_uniq = np.array(model_config['Tau%d'%(i+1)])
+        tau.append(np.repeat(tau_uniq[:, None],
+                                          LP_size[i+1]//tau_uniq.shape[0]))
+    layers = torch.nn.ModuleList()
+    prev_n=model_config['n_in']
+    
+    layers.append(
+        FwdDENeurons(
+            n_in=prev_n,
+            n_neurons=LP_size[0],
+            tau=tau[0], 
+            activation=model_config["activation"], 
+            dt=dt, 
+            scale=1.0,
+            device=device,
+        )
+    )
+    prev_n=LP_size[0]
+
+    if model_config["reducedNonlinear"]:
+        for i in range(model_config['num_LP_layers']-2):
+            layers.append(
+                FwdDENeuronsReduced(
+                    n_in=prev_n,
+                    n_neurons=LP_size[i+1],
+                    tau=tau[i+1], 
+                    activation="linear", 
+                    dt=dt, 
+                    device=device,
+                )
+            )
+            prev_n=LP_size[i+1]
+    else:
+        for i in range(model_config['num_LP_layers']-2):
+            layers.append(
+                FwdDENeurons(
+                    n_in=prev_n,
+                    n_neurons=LP_size[i+1],
+                    tau=tau[i+1], 
+                    activation=model_config["activation"], 
+                    dt=dt, 
+                    scale=0.6,
+                    device=device,
+                )
+            )
+            prev_n=LP_size[i+1]
+
+    layers.append(
+        LastFwdDENeurons(
+            n_in=prev_n, 
+            n_neurons=LP_size[i+2], 
+            tau=tau[i+2], 
+            activation=model_config["activation"], 
+            dt=dt, 
+            scale=1.0,
+            device=device,
+            )
+    )
+    prev_n=LP_size[i+2]
+    for i in range(model_config['num_Ins_layers']):
+        layers.append(
+            FwdInsNeurons(
+                n_in=prev_n,
+                n_neurons=Ins_size[i],
+                activation=model_config["activation"], 
+                scale=1.0,
+                dt=dt,
+                device=device,
+            )
+        )
+        prev_n=Ins_size[i]
+                
+    layers.append(
+        FwdInsNeurons(
+            n_in=prev_n, 
+            n_neurons=model_config['n_out'],
+            activation='linear', 
+            dt=dt, 
+            scale=1.0,
+            device=device,
+            )
+    )
+    
+    return DEFwdNetwork(layers=layers, device=device)
+
+def buildNetCompare(model_config, general_config, neurontype='GLE'):
+    device = general_config["device"]
+    LP_size = list(model_config['LP_size'])
+    Ins_size = list(model_config['Ins_size'])
+    dt = general_config['dt']
+    tau = []
+    tau_min, tau_max, repeat = model_config['Tau0']
+    tau0 = np.logspace(np.log10(tau_min), np.log10(tau_max), LP_size[0]//repeat, dtype=np.float32)
+    tau.append(np.repeat(tau0[:, None], repeat))
+    for i in range(model_config['num_LP_layers']-1):
+        tau_uniq = np.array(model_config['Tau%d'%(i+1)])
+        tau.append(np.repeat(tau_uniq[:, None],
+                                          LP_size[i+1]//tau_uniq.shape[0]))
+    layers = torch.nn.ModuleList()
+
+    if neurontype=='GLE':
+        layer_fn = FwdGLENeurons  
+    elif  neurontype=='RFLO':
+        layer_fn = FwdRFNeurons
+    else:
+        raise NotImplementedError
+
+    prev_n=model_config['n_in']
+    for i in range(model_config['num_LP_layers']):
+        if i==0 or i+1==model_config['num_LP_layers']:
+            scale = 1.
+            activation = model_config["activation"]
+        elif model_config["reducedNonlinear"]:
+            scale=1.
+            activation = "linear"
+        else:
+            scale=0.6
+            activation = model_config["activation"]
+
+        layers.append(
+            layer_fn(
+                n_in=prev_n,
+                n_neurons=LP_size[i],
+                tau=tau[i], 
+                activation=activation, 
+                dt=dt, 
+                scale=scale,
+                device=device,
+            )
+        )
+        prev_n=LP_size[i]
+
+    for i in range(model_config['num_Ins_layers']):
+        layers.append(
+            FwdInsNeurons(
+                n_in=prev_n,
+                n_neurons=Ins_size[i],
+                activation=model_config["activation"], 
+                scale=1.0,
+                dt=dt,
+                device=device,
+            )
+        )
+        prev_n=Ins_size[i]
+                
+    layers.append(
+        FwdInsNeurons(
+            n_in=prev_n, 
+            n_neurons=model_config['n_out'],
+            activation='linear', 
+            dt=dt, 
+            scale=1.0,
+            device=device,
+            )
+    )
+    
+    return FwdNetwork(layers=layers, dt=dt, device=device)
 
 
 class Recorder():

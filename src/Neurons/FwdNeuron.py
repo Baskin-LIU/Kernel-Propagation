@@ -195,8 +195,8 @@ class FwdGLENeurons(FwdNeurons):
         self.bias += self.mismatch.mean(0) * self.lr_b
 
     def backwards(self, ):
-        self.W_in.grad = -(self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
-        self.bias.grad = -self.mismatch.mean(0)
+        self.W_in.grad -= (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
+        self.bias.grad -= self.mismatch.mean(0)
 
     def reset(self,):
         super().reset()
@@ -225,8 +225,8 @@ class FwdRFNeurons(FwdNeurons):
         self.bias += self.epsilon.mean(0) * self.lr_b
 
     def backwards(self, ):
-        self.W_in.grad = -(self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(dim=0)
-        self.bias.grad = -self.epsilon.mean(0)
+        self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+        self.bias.grad -= self.epsilon.mean(0)
 
     def reset(self,):
         super().reset()

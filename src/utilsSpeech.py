@@ -6,6 +6,7 @@ from Neurons.FwdNeuron import *
 from Neurons.DeepEligNeuron import *
 from Network import *
 from inputFuc import *
+from torch.utils.data import Dataset
 from torchaudio.datasets import SPEECHCOMMANDS
 
 
@@ -26,29 +27,30 @@ default_data_config = {
     'n_fft': 400,
     'win_length': 400,
     'hop_length': 32,
-    'n_mels': 64,
-    'duation': 1000, #ms
+    'n_mels': 48,
+    'duration': 1000, #ms
     }
 
 default_train_config = {
     'num_epochs': 150, 
-    'learning_rate': 1e-2, 
-    'batch_size': 128,
+    'learning_rate': 2e-2, 
+    'batch_size': 256,
     'update_intervel': 200, #ms
+    'num_workers': 4, 
     }
 
 default_model_config = {
-    'n_in': 64, 
+    'n_in': 48, 
     'n_out': 35, 
     'num_LP_layers': 3, 
     'num_Ins_layers': 1, 
-    'LP_size': [90, 120, 120], 
+    'LP_size': [60, 90, 120], 
     'Ins_size': [120, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
     'Tau0': [default_general_config['dt'], 12, 6], 
     'Tau1': [4, 16], 
-    'Tau2': [9, 24],
+    'Tau2': [9, 24, 48],
     "answer_period": 600,
     }
 
@@ -56,7 +58,7 @@ from pathlib import Path
 import torch
 
 
-class MelFolderDataset(Dataset):
+class MelDataset(Dataset):
     def __init__(self, root_dir):
         self.root = Path(root_dir)
         self.samples = list(self.root.rglob("*.pt"))
@@ -76,48 +78,37 @@ class MelFolderDataset(Dataset):
 
         return mel, label_idx
 
-class SubsetSC(SPEECHCOMMANDS):
-    def __init__(self, subset: str = None):
-        super().__init__("../", download=True)
 
-        def load_list(filename):
-            filepath = os.path.join(self._path, filename)
-            with open(filepath) as fileobj:
-                return [os.path.normpath(os.path.join(self._path, line.strip())) for line in fileobj]
+class CollateMel:
+    def __init__(self, target_time_steps: int):
+        self.target_T = target_time_steps
 
-        if subset == "validation":
-            self._walker = load_list("validation_list.txt")
-        elif subset == "testing":
-            self._walker = load_list("testing_list.txt")
-        elif subset == "training":
-            excludes = load_list("validation_list.txt") + load_list("testing_list.txt")
-            excludes = set(excludes)
-            self._walker = [w for w in self._walker if w not in excludes]
+    def __call__(self, batch):
+        """
+        batch: list of (mel [n_mels, T], label)
+        returns:
+            mels  [B, n_mels, target_T]
+            labels [B]
+        """
+        mels, labels = zip(*batch)
 
+        resized = []
+        for mel in mels:
+            # mel: [n_mels, T]
+            mel = mel.unsqueeze(0) # [1, n_mels, T]
+            mel = F.interpolate(
+                mel,
+                size=self.target_T,
+                mode="linear",
+                align_corners=False
+            )
+            resized.append(mel.squeeze(0))
 
-def pad_sequence(batch):
-    # Make all tensor in a batch the same length by padding with zeros
-    batch = [item.t() for item in batch]
-    batch = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True, padding_value=0., padding_side='right')
-    return batch.permute(0, 2, 1)
+        mels = torch.stack(resized)
+        labels = torch.tensor(labels, dtype=torch.long)
 
+        return mels, labels
 
-def collate_fn(batch):
-    # A data tuple has the form:
-    # waveform, sample_rate, label, speaker_id, utterance_number
-
-    tensors, targets = [], []
-
-    # Gather in lists, and encode labels as indices
-    for waveform, _, label, *_ in batch:
-        tensors += [waveform]
-        targets += [label_to_index(label)]
-
-    # Group the list of tensors into a batched tensor
-    tensors = pad_sequence(tensors)
-    targets = torch.stack(targets)
-
-    return tensors, targets
 
 def train_batch(model, optimizer, x, y, answer_step, beta, update_period=10):
     n_steps = x.shape[-1]
@@ -164,7 +155,7 @@ def train_batch_delay(model, optimizer, x, y, answer_step, beta):
     return total_loss
 
 
-def test(model, data_loader, transform, n_class, answer_step, beta):
+def test(model, data_loader, n_class, answer_step, beta):
     model.eval()
     num_sample=len(data_loader.dataset)
     loss, correct = 0., 0
@@ -173,7 +164,6 @@ def test(model, data_loader, transform, n_class, answer_step, beta):
         for x_test, y_test in data_loader:
             x_test = x_test.to(device)
             y_test = y_test.to(device)
-            x_test = transform(x_test)[:,0,:,:-1]
             n_steps = x_test.shape[-1]
 
             model.reset()
@@ -223,3 +213,46 @@ def index_to_label(index):
     # Return the word corresponding to the index in labels
     # This is the inverse of label_to_index
     return labels[index]
+
+class SubsetSC(SPEECHCOMMANDS):
+    def __init__(self, subset: str = None):
+        super().__init__("../", download=True)
+
+        def load_list(filename):
+            filepath = os.path.join(self._path, filename)
+            with open(filepath) as fileobj:
+                return [os.path.normpath(os.path.join(self._path, line.strip())) for line in fileobj]
+
+        if subset == "validation":
+            self._walker = load_list("validation_list.txt")
+        elif subset == "testing":
+            self._walker = load_list("testing_list.txt")
+        elif subset == "training":
+            excludes = load_list("validation_list.txt") + load_list("testing_list.txt")
+            excludes = set(excludes)
+            self._walker = [w for w in self._walker if w not in excludes]
+
+
+def pad_sequence(batch):
+    # Make all tensor in a batch the same length by padding with zeros
+    batch = [item.t() for item in batch]
+    batch = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True, padding_value=0., padding_side='right')
+    return batch.permute(0, 2, 1)
+
+
+def collate_fn_wav(batch):
+    # A data tuple has the form:
+    # waveform, sample_rate, label, speaker_id, utterance_number
+
+    tensors, targets = [], []
+
+    # Gather in lists, and encode labels as indices
+    for waveform, _, label, *_ in batch:
+        tensors += [waveform]
+        targets += [label_to_index(label)]
+
+    # Group the list of tensors into a batched tensor
+    tensors = pad_sequence(tensors)
+    targets = torch.stack(targets)
+
+    return tensors, targets
