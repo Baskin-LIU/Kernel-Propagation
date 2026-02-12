@@ -12,7 +12,7 @@ from torchaudio.datasets import SPEECHCOMMANDS
 ### DEFAULT Config ####
 default_general_config = {
     'seed': 0, 
-    'dt': 1., 
+    'dt': 2., 
     'device': 'cpu', 
     'short_training_run': False,
     'visual_kernel': False,
@@ -25,7 +25,7 @@ default_data_config = {
     'preprocessing':'Mel',
     'n_fft': 400,
     'win_length': 400,
-    'hop_length': 16,
+    'hop_length': 32,
     'n_mels': 64,
     'duation': 1000, #ms
     }
@@ -46,11 +46,35 @@ default_model_config = {
     'Ins_size': [120, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': [1, 12, 6], 
-    'Tau1': [3, 12], 
-    'Tau2': [5, 16],
-    "answer_period":300,
+    'Tau0': [default_general_config['dt'], 12, 6], 
+    'Tau1': [4, 16], 
+    'Tau2': [9, 24],
+    "answer_period": 600,
     }
+
+from pathlib import Path
+import torch
+
+
+class MelFolderDataset(Dataset):
+    def __init__(self, root_dir):
+        self.root = Path(root_dir)
+        self.samples = list(self.root.rglob("*.pt"))
+
+        self.labels = sorted([p.name for p in self.root.iterdir() if p.is_dir()])
+        self.label_to_idx = {l: i for i, l in enumerate(self.labels)}
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        pt_path = self.samples[idx]
+        mel = torch.load(pt_path)
+
+        label = pt_path.parent.name
+        label_idx = self.label_to_idx[label]
+
+        return mel, label_idx
 
 class SubsetSC(SPEECHCOMMANDS):
     def __init__(self, subset: str = None):
@@ -96,11 +120,9 @@ def collate_fn(batch):
     return tensors, targets
 
 def train_batch(model, optimizer, x, y, answer_step, beta, update_period=10):
-    n_steps = x.shape[1]
+    n_steps = x.shape[-1]
     avg_p = 0.
     model.reset()
-    #optimizer.zero_grad(set_to_none=False)
-    prex = torch.zeros(x.shape[0], 1).to(model.device)
     for t in range(n_steps):
         r_out,_ = model.step(x[:,:,t])
         if n_steps-t <= answer_step:
@@ -120,9 +142,8 @@ def train_batch(model, optimizer, x, y, answer_step, beta, update_period=10):
     return total_loss
 
 def train_batch_delay(model, optimizer, x, y, answer_step, beta):
-    n_steps = x.shape[1]
+    n_steps = x.shape[-1]
     avg_p = 0.
-    
     model.reset()
     prex = torch.zeros(x.shape[0], 1).to(model.device)
     for t in range(n_steps):
