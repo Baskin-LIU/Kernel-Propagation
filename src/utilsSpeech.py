@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import os
+import json
 from Neurons.FwdNeuron import *
 from Neurons.DeepEligNeuron import *
 from Network import *
@@ -26,7 +27,7 @@ default_data_config = {
     'preprocessing':'Mel',
     'n_fft': 400,
     'win_length': 400,
-    'hop_length': 32,
+    'hop_length': 64,
     'n_mels': 48,
     'duration': 1000, #ms
     }
@@ -44,44 +45,101 @@ default_model_config = {
     'n_out': 35, 
     'num_LP_layers': 3, 
     'num_Ins_layers': 1, 
-    'LP_size': [60, 90, 120], 
-    'Ins_size': [120, ], 
+    'LP_size': [90, 120, 150], 
+    'Ins_size': [150, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': [default_general_config['dt'], 12, 6], 
-    'Tau1': [4, 16], 
-    'Tau2': [9, 24, 48],
-    "answer_period": 600,
+    'Tau0': [default_general_config['dt'], 16, 6], 
+    'Tau1': [4, 20], 
+    'Tau2': [5, 24, 48],
+    "answer_period": 800,
     }
 
 from pathlib import Path
 import torch
 
 
-class MelDataset(Dataset):
-    def __init__(self, root_dir):
-        self.root = Path(root_dir)
-        self.samples = list(self.root.rglob("*.pt"))
+# class ShardedMelDataset(torch.utils.data.Dataset):
+#     def __init__(self, split_dir):
 
-        self.labels = sorted([p.name for p in self.root.iterdir() if p.is_dir()])
-        self.label_to_idx = {l: i for i, l in enumerate(self.labels)}
+#         split_dir = Path(split_dir)
+
+#         with open(split_dir / "shard_index.json") as f:
+#             shard_info = json.load(f)
+
+#         self.shards = []
+#         self.cum_sizes = []
+
+#         total = 0
+#         for s in shard_info:
+#             mel = np.load(split_dir / s["mel_file"], mmap_mode="r")
+#             lab = np.load(split_dir / s["label_file"], mmap_mode="r")
+#             self.shards.append((mel, lab))
+#             total += len(lab)
+#             self.cum_sizes.append(total)
+
+#     def __len__(self):
+#         return self.cum_sizes[-1]
+
+#     def __getitem__(self, idx):
+
+#         shard_id = np.searchsorted(self.cum_sizes, idx, side="right")
+#         prev = 0 if shard_id == 0 else self.cum_sizes[shard_id - 1]
+#         local_idx = idx - prev
+
+#         mel, lab = self.shards[shard_id]
+#         return torch.from_numpy(mel[local_idx]), torch.tensor(lab[local_idx])
+
+
+class ShardedMelDataset(torch.utils.data.Dataset):
+
+    def __init__(self, split_dir):
+        split_dir = Path(split_dir)
+
+        with open(split_dir / "shard_index.json") as f:
+            self.shard_info = json.load(f)
+
+        self.split_dir = split_dir
+
+        # store only paths (pickle-safe)
+        self.mel_paths = [split_dir / s["mel_file"] for s in self.shard_info]
+        self.label_paths = [split_dir / s["label_file"] for s in self.shard_info]
+        self.sizes = [s["num_samples"] for s in self.shard_info]
+
+        # cumulative index map
+        self.cum_sizes = np.cumsum(self.sizes)
+
+        # memmaps will be opened lazily per worker
+        self._mels = None
+        self._labels = None
+
+    def _lazy_init(self):
+        if self._mels is None:
+            self._mels = [
+                np.load(p, mmap_mode="r") for p in self.mel_paths
+            ]
+            self._labels = [
+                np.load(p, mmap_mode="r") for p in self.label_paths
+            ]
 
     def __len__(self):
-        return len(self.samples)
+        return int(self.cum_sizes[-1])
 
     def __getitem__(self, idx):
-        pt_path = self.samples[idx]
-        mel = torch.load(pt_path)
+        self._lazy_init()
 
-        label = pt_path.parent.name
-        label_idx = self.label_to_idx[label]
+        shard_id = np.searchsorted(self.cum_sizes, idx, side="right")
+        prev = 0 if shard_id == 0 else self.cum_sizes[shard_id - 1]
+        local_idx = idx - prev
 
-        return mel, label_idx
-
+        x = torch.tensor(self._mels[shard_id][local_idx])
+        y = torch.tensor(self._labels[shard_id][local_idx])
+        return x, y
 
 class CollateMel:
-    def __init__(self, target_time_steps: int):
+    def __init__(self, target_time_steps: int, n_class: int):
         self.target_T = target_time_steps
+        self.n_class = n_class
 
     def __call__(self, batch):
         """
@@ -106,56 +164,58 @@ class CollateMel:
 
         mels = torch.stack(resized)
         labels = torch.tensor(labels, dtype=torch.long)
+        OntHot = F.one_hot(labels, num_classes=self.n_class)
 
-        return mels, labels
+        return mels, OntHot
 
 
-def train_batch(model, optimizer, x, y, answer_step, beta, update_period=10):
+def train_batch_periodic(model, optimizer, x, y, answer_step, beta, update_period=10):
     n_steps = x.shape[-1]
     avg_p = 0.
-    model.reset()
-    for t in range(n_steps):
-        r_out,_ = model.step(x[:,:,t])
-        if n_steps-t <= answer_step:
-            p = torch.softmax(r_out, dim=1)
-            error = (one_hot_label - p)*beta[t]
-            model.prop(error=error)
-            model.backwards()
-            if t%update_period==0:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=False)
-            avg_p = p + avg_p
-        else:
-            model.prop(learn=False)
-    avg_p /= answer_step
-    total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
+    with torch.no_grad():
+        model.reset()
+        for t in range(n_steps):
+            r_out,_ = model.step(x[:,:,t])
+            if n_steps-t <= answer_step:
+                p = torch.softmax(r_out, dim=1)
+                error = (one_hot_label - p)*beta[t]
+                model.prop(error=error)
+                model.backwards()
+                if t%update_period==0:
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=False)
+                avg_p = p + avg_p
+            else:
+                model.prop(learn=False)
+        avg_p /= answer_step
+        total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
             
     return total_loss
 
 def train_batch_delay(model, optimizer, x, y, answer_step, beta):
     n_steps = x.shape[-1]
     avg_p = 0.
-    model.reset()
-    prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(n_steps):
-        r_out,_ = model.step(x[:,:,t])
-        if n_steps-t <= answer_step:
-            p = torch.softmax(r_out, dim=1)
-            error = (y-p)*beta[t]
-            model.prop(error=error)
-            model.backwards()
-            avg_p = p + avg_p
-        else:
-            model.prop(learn=False)
-    optimizer.step()
-
-    avg_p /= answer_step
-    total_loss = -(y * torch.log(avg_p+1e-7)).mean(dim=1).sum().item()        
+    with torch.no_grad():
+        model.reset()
+        for t in range(n_steps):
+            r_out,_ = model.step(x[:,:,t])
+            if n_steps-t <= answer_step:
+                p = torch.softmax(r_out, dim=1)
+                error = (y-p)*beta[t]
+                model.prop(error=error)
+                model.backwards()
+                avg_p = p + avg_p
+            else:
+                model.prop(learn=False)
+        optimizer.step()
+    
+        avg_p /= answer_step
+        total_loss = -(y * torch.log(avg_p+1e-7)).mean(dim=1).sum().item()        
             
     return total_loss
 
 
-def test(model, data_loader, n_class, answer_step, beta):
+def test(model, data_loader, answer_step, beta):
     model.eval()
     num_sample=len(data_loader.dataset)
     loss, correct = 0., 0
@@ -174,15 +234,28 @@ def test(model, data_loader, n_class, answer_step, beta):
                     p = torch.softmax(r_out, dim=1)
                     pred_p = p*beta[t] + pred_p
             prediction = torch.argmax(pred_p, dim=1)
-            one_hot_label = F.one_hot(y_test, num_classes=n_class)
-            loss += -(one_hot_label * torch.log(pred_p)).mean(dim=1).sum().item()
-            correct += (prediction==y_test).sum().item()
+            loss += -(y_test * torch.log(pred_p)).mean(dim=1).sum().item()
+            correct += (prediction==torch.argmax(y_test, dim=1)).sum().item()
 
     loss /= num_sample
     acc_p = correct*100/num_sample
 
     return acc_p, loss
 
+def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
+    n_steps = x.shape[-1]
+    model.reset()
+    total_loss = 0.
+    for t in range(n_steps):
+        r_out,_ = model.step(x[:, :, t])
+        if n_steps-t <= answer_step:
+            p = torch.softmax(r_out, dim=1)
+            total_loss += -(y * torch.log(p)).mean()*beta[t]
+    total_loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+            
+    return total_loss.detach()
 
 
 labels = ['backward', 'bed', 'bird',
@@ -256,3 +329,23 @@ def collate_fn_wav(batch):
     targets = torch.stack(targets)
 
     return tensors, targets
+
+class MelDataset(Dataset):
+    def __init__(self, root_dir):
+        self.root = Path(root_dir)
+        self.samples = list(self.root.rglob("*.pt"))
+
+        self.labels = sorted([p.name for p in self.root.iterdir() if p.is_dir()])
+        self.label_to_idx = {l: i for i, l in enumerate(self.labels)}
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        pt_path = self.samples[idx]
+        mel = torch.load(pt_path)
+
+        label = pt_path.parent.name
+        label_idx = self.label_to_idx[label]
+
+        return mel, label_idx

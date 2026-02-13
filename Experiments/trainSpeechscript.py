@@ -29,6 +29,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--group_name", type=str, default="test")
+    parser.add_argument("--save_local", dest="save_local", action="store_true")
     ### General config
     parser.add_argument("--short_run", dest="short_run", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -41,23 +42,24 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=150)
     parser.add_argument("--answer_t", type=int, default=600)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--method", type=str, default='KP')
+    parser.add_argument("--update_interval", type=int, default=-1)
+    
 
     ### Data config
-    parser.add_argument("--batch", type=int, default=128)
+    parser.add_argument("--batch", type=int, default=256)
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
     parser.add_argument("--num_LP_layers", type=int, default=3)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[90, 120, 120],)
-    parser.add_argument("--Ins_size", type=int, nargs="+", default=[120, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[1, 12, 6],)
-    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 12],)
-    parser.add_argument("--Tau2", type=int, nargs="+", default=[5, 16],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[1, 8., 12.],)
-    
-    parser.add_argument("--save_model", dest="save_model", action="store_true")
+        help="Hidden Low-pass layer sizes", default=[90, 120, 150, 150],)
+    parser.add_argument("--Ins_size", type=int, nargs="+", default=[150, ],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 16, 6],)
+    parser.add_argument("--Tau1", type=int, nargs="+", default=[4, 20],)
+    parser.add_argument("--Tau2", type=int, nargs="+", default=[5, 24, 48],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[3, 12., 36.],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
@@ -107,6 +109,8 @@ if __name__ == "__main__":
     train_config["learning_rate"] = args.lr
     train_config["batch_size"] = args.batch
     train_config["num_workers"] = args.workers
+    train_config["method"] = args.method
+    train_config["update_interval"] = args.update_interval
     
     # Dataset Config
     dt = general_config["dt"]
@@ -123,7 +127,7 @@ if __name__ == "__main__":
     # wandb config
     api_key_file = Path("~/.wandbAPIkey.txt").expanduser().resolve()
     project_name = "KPSpeech"
-    group_name = args.group_name
+    group_name = args.group_name + args.method
 
     # login to wandb
     with open(api_key_file, "r") as file:
@@ -152,60 +156,74 @@ if __name__ == "__main__":
 
     print("Data, model and training setup started...")
     # Create training and testing split of the data. We do not use validation in this tutorial.
-    train_set = SubsetSC("training")
-    val_set = SubsetSC("validation")
-    
-    waveform, sample_rate, label, speaker_id, utterance_number = train_set[0]
-    data_config['sample_rate'] = sample_rate
-    
-    print("Shape of waveform: {}".format(waveform.size()))
-    print("Sample rate of waveform: {}".format(sample_rate))
-    
-    data_config["final_seq_length"] = transformed.shape[-1]
+    data_config["n_steps"] = int(data_config["duration"]/dt)
     data_config["n_class"] = len(labels)
     n_class = data_config["n_class"]
-    n_steps = data_config["final_seq_length"]
+    n_steps = data_config["n_steps"]
     answer_steps = int(model_config["answer_period"]/dt)
+    rootdir = Path('..') / "SpeechCommands" / "Mel_npy"
     
-    word_start = "yes"
-    index = label_to_index(word_start)
-    word_recovered = index_to_label(index)
+    train_set = ShardedMelDataset(rootdir / 'training')
+    val_set = ShardedMelDataset(rootdir / 'validation')
     
-    print(word_start, "-->", index, "-->", word_recovered, 
-          ", transformed shape:", transformed.shape, ", Number of steps:", n_steps)
-
+    mel_sample, label = val_set[0]
+    
     if device == "cuda":
-        num_workers = train_config["num_workers"]
+        num_workers = train_config['num_workers']
         pin_memory = True
     else:
         num_workers = 0
         pin_memory = False
     
+    collate_fn = CollateMel(n_steps, n_class)
+    
     train_loader = torch.utils.data.DataLoader(
         train_set,
         batch_size=train_config['batch_size'],
         shuffle=True,
+        #sampler=sampler,
         collate_fn=collate_fn,
         num_workers=num_workers,
-        pin_memory=pin_memory,
+        pin_memory=True,
     )
+    
     val_loader = torch.utils.data.DataLoader(
         val_set,
-        batch_size=256,
+        batch_size=512,
         shuffle=False,
         drop_last=False,
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
+    
     train_config["batches_per_epoch"] = len(train_loader)
-
-
-    # Init network and optimizer
+    
     model_config['n_out'] = data_config['n_class']
     model_config['n_in'] = data_config['n_mels']
-    model = buildKPNet(model_config, general_config).to(device)
     
+    beta = torch.zeros(n_steps).to(device)
+    beta[-answer_steps:]=1.
+    beta /= beta.sum()
+
+    # Init network and optimizer
+    if args.method=='BPTT':
+        model = buildKPNet(model_config, general_config).to(device)
+        train_fn = train_batch_BPTT
+    else:
+        if args.update_interval==-1:
+            train_fn = train_batch_delay
+        else:
+            train_fn = train_batch_periodic(args.update_interval)
+        if args.method=='KP':
+            model = buildKPNet(model_config, general_config).to(device)
+        elif args.method=='GLE':
+            model = buildNetCompare(model_config, general_config, neurontype=args.method=='RFLO').to(device)
+        elif args.method=='RFLO':
+            model = buildNetCompare(model_config, general_config, neurontype=args.method=='RFLO').to(device)
+        else:
+            raise NotImplementedError
+        
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=train_config["learning_rate"],
@@ -219,57 +237,54 @@ if __name__ == "__main__":
         patience=2
     )
     
-    transform = transform.to(device)
     beta = torch.zeros(n_steps).to(model.device)
-    #beta[n_steps-answer_steps:40] = torch.linspace(0, 1, 40+answer_period-n_steps)
     beta[-answer_steps:]=1.
     beta /= beta.sum()
     
     best_val_acc = 0.
 
     print("Training started...")
-    with torch.no_grad():
-        loss_record = []
-        for epoch in range(train_config["num_epochs"]):
-            Cum_errors=0.
-            pbar = tqdm(
-                enumerate(train_loader, 0),
-                total=train_config["batches_per_epoch"],
-                disable=not general_config["verbose"],
-            )
-            for batch_idx, (x, target) in pbar:
-                y = F.one_hot(target, num_classes=n_class).to(device)
-                total_error = train_batch_delay(model, optimizer, x.to(device),
-                                                y, answer_steps, beta)
-                Cum_errors += total_error
-            Cum_errors /= len(train_loader.dataset)
     
-            val_acc, val_loss = test(model, val_loader, n_class, 
-                                    answer_steps, beta)
-            scheduler.step(val_loss)
-    
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                best_model_state_dict = model.state_dict().copy()
-    
-            print(
-                f"Epoch: {epoch+1}, "
-                f'Train Loss: {Cum_errors:.4f},'
-                f'Val Loss: {val_loss:.4f},'
-                f'Val Acc: {val_acc:.1f},'
-                f'Best Acc: {best_val_acc:.1f},'
-            )
-            
-            # Log statistics
-            wandb.log(
-                {
-                    "epoch": epoch+1,
-                    "train_loss": Cum_errors,
-                    "val_loss": val_loss,
-                    "val_acc": val_acc,
-                }
-            )
-            pbar.close()
+    loss_record = []
+    for epoch in range(train_config["num_epochs"]):
+        Cum_errors=0.
+        pbar = tqdm(
+            enumerate(train_loader, 0),
+            total=train_config["batches_per_epoch"],
+            disable=not general_config["verbose"],
+        )
+        for batch_idx, (x, target) in pbar:
+            # total_error = train_fn(model, optimizer, x.to(device),
+            #                             target.to(device), answer_steps, beta)
+            continue
+            Cum_errors += total_error
+        Cum_errors /= len(train_loader.dataset)
+
+        val_acc, val_loss = test(model, val_loader, answer_steps, beta)
+        scheduler.step(val_loss)
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state_dict = model.state_dict().copy()
+
+        print(
+            f"Epoch: {epoch+1}, "
+            f'Train Loss: {Cum_errors:.4f},'
+            f'Val Loss: {val_loss:.4f},'
+            f'Val Acc: {val_acc:.1f},'
+            f'Best Acc: {best_val_acc:.1f},'
+        )
+        
+        # Log statistics
+        wandb.log(
+            {
+                "epoch": epoch+1,
+                "train_loss": Cum_errors,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+            }
+        )
+        pbar.close()
             
     wandb.log({"Best Val Acc": best_val_acc})
 
@@ -279,21 +294,19 @@ if __name__ == "__main__":
     gc.collect()
 
     print("Evaluation on best model...")
-    test_set = SubsetSC("testing")
+    test_set = ShardedMelDataset(rootdir / 'testing')
     test_loader = torch.utils.data.DataLoader(
         test_set,
-        batch_size=256,
+        batch_size=512,
         shuffle=False,
         drop_last=False,
         collate_fn=collate_fn,
-        num_workers=0,
-        pin_memory=False,
+        num_workers=num_workers,
+        pin_memory=True,
     )
     
     model.load_state_dict(best_model_state_dict)
-
-    test_acc, test_loss = test(model, test_loader, n_class, 
-                                    answer_steps, beta)
+    test_acc, test_loss = test(model, test_loader, answer_steps, beta)
     print(
                 f'Test Loss: {test_loss:.4f},'
                 f'Test Acc: {test_acc:.1f},'
@@ -306,7 +319,7 @@ if __name__ == "__main__":
         best_model_state_dict, str(artefacts_dir / "best_model_state.pt")
     )
     
-    if args.save_local:
+    if args.save_local and args.method=='KP':
         print("Saved local at saved_models \ Speech%.1f"%best_val_acc)
         shutil.copytree(artefacts_dir, Path("..") / "saved_models" / f"Speech{best_val_acc:.1f}", dirs_exist_ok=True)
     

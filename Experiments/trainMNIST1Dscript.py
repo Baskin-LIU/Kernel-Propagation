@@ -28,6 +28,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--group_name", type=str, default="test")
+    parser.add_argument("--save_local", dest="save_local", action="store_true")
     ### General config
     parser.add_argument("--short_run", dest="short_run", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -55,8 +56,6 @@ if __name__ == "__main__":
     parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 6],)
     parser.add_argument("--Tau2", type=int, nargs="+", default=[2, 7],)
     parser.add_argument("--Tau3", type=int, nargs="+", default=[1, 8., 12.],)
-    
-    parser.add_argument("--save_model", dest="save_model", action="store_true")
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
