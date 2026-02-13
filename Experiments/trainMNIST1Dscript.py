@@ -40,6 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=8e-3)
     parser.add_argument("--num_epochs", type=int, default=150)
     parser.add_argument("--answer_t", type=int, default=300)
+    parser.add_argument("--method", type=str, default='KP')
+    parser.add_argument("--update_interval", type=int, default=-1)
 
     ### Data config
     parser.add_argument("--prepad", type=int, default=10)
@@ -104,6 +106,8 @@ if __name__ == "__main__":
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
     train_config["learning_rate"] = args.lr
     train_config["batch_size"] = args.batch
+    train_config["method"] = args.method
+    train_config["update_interval"] = args.update_interval
     
     # Dataset Config
     data_config["prepad"] = args.prepad
@@ -158,7 +162,22 @@ if __name__ == "__main__":
     x_test, y_test = torch.tensor(data['x_test'],dtype=torch.float32).unsqueeze(-1), torch.tensor(data['y_test'], dtype=torch.int64)
 
     # init network and optimizer
-    model = buildMNISTNet(model_config, general_config).to(device)
+    if args.method=='BPTT':
+        model = buildKPNet(model_config, general_config).to(device)
+        train_fn = train_batch_BPTT
+    else:
+        if args.update_interval==-1:
+            train_fn = train_batch_delay
+        else:
+            train_fn = train_batch_periodic(args.update_interval)
+        if args.method=='KP':
+            model = buildKPNet(model_config, general_config).to(device)
+        elif args.method=='GLE':
+            model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
+        elif args.method=='RFLO':
+            model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
+        else:
+            raise NotImplementedError
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -187,46 +206,45 @@ if __name__ == "__main__":
     best_test_acc = 0.
 
     print("Training started...")
-    with torch.no_grad():
-        error_record, loss_record = [], []
-        for epoch in range(train_config["num_epochs"]):
-            Cum_errors=0.
-            permu = np.random.permutation(4000).reshape(-1, train_config["batch_size"])
-            pbar = tqdm(
-                permu,
-                total=permu.shape[0],
-            )
-            for idx in pbar:
-                total_error = train_batch_delay(model, optimizer, x[idx].to(device),
-                                                y[idx].to(device), answer_steps, pad_steps, beta)
-                Cum_errors += total_error
-            Cum_errors /= permu.shape[0]
+    error_record, loss_record = [], []
+    for epoch in range(train_config["num_epochs"]):
+        Cum_errors=0.
+        permu = np.random.permutation(4000).reshape(-1, train_config["batch_size"])
+        pbar = tqdm(
+            permu,
+            total=permu.shape[0],
+        )
+        for idx in pbar:
+            total_error = train_batch_delay(model, optimizer, x[idx].to(device),
+                                            y[idx].to(device), answer_steps, pad_steps, beta)
+            Cum_errors += total_error
+        Cum_errors /= permu.shape[0]
 
-            test_acc, test_loss = test(model, x_test.to(device), y_test.to(device),
-                                    answer_steps, pad_steps, beta)
-            scheduler.step(test_loss)
+        test_acc, test_loss = test(model, x_test.to(device), y_test.to(device),
+                                answer_steps, pad_steps, beta)
+        scheduler.step(test_loss)
 
-            if test_acc > best_test_acc:
-                best_test_acc = test_acc
-                best_model_state_dict = copy.deepcopy(model.state_dict())
+        if test_acc > best_test_acc:
+            best_test_acc = test_acc
+            best_model_state_dict = copy.deepcopy(model.state_dict())
 
-            print(
-                f"Epoch: {epoch+1}, "
-                f'Train Loss: {Cum_errors:.4f},'
-                f'Test Loss: {test_loss:.4f},'
-                f'Test Acc: {test_acc:.1f},'
-                f'Best Acc: {best_test_acc:.1f},'
-            )
-            
-            # Log statistics
-            wandb.log(
-                {
-                    "epoch": epoch+1,
-                    "train_loss": Cum_errors,
-                    "test_loss": test_loss,
-                    "test_acc": test_acc,
-                }
-            )
+        print(
+            f"Epoch: {epoch+1}, "
+            f'Train Loss: {Cum_errors:.4f},'
+            f'Test Loss: {test_loss:.4f},'
+            f'Test Acc: {test_acc:.1f},'
+            f'Best Acc: {best_test_acc:.1f},'
+        )
+        
+        # Log statistics
+        wandb.log(
+            {
+                "epoch": epoch+1,
+                "train_loss": Cum_errors,
+                "test_loss": test_loss,
+                "test_acc": test_acc,
+            }
+        )
     wandb.log({"Best Test Acc": best_test_acc})
     # Free up memory
     gc.collect()

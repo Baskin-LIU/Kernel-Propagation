@@ -30,12 +30,12 @@ default_data_config = {
     'final_seq_length': 360,
     'seed': 42,
     'url': 'https://github.com/greydanus/mnist1d/raw/master/mnist1d_data.pkl',
-    'prepad': 5,      
+    'prepad': 0,      
     }
 
 default_train_config = {
     'num_epochs': 150, 
-    'learning_rate': 1e-2, 
+    'learning_rate': 8e-3, 
     'batch_size': 100, 
     }
 
@@ -56,58 +56,59 @@ default_model_config = {
     }
 
 
-def train_batch(model, optimizer, x, y, answer_step, pad_steps, beta, update_period=10):
+def train_batch_periodic(model, optimizer, x, y, answer_step, pad_steps, beta, update_period=10):
     n_steps = x.shape[1]
     avg_p = 0.
-    one_hot_label = F.one_hot(y, num_classes=10)
-    model.reset()
-    #optimizer.zero_grad(set_to_none=False)
-    prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(pad_steps):
-        r_out,_ = model.step(prex)
-        model.prop(learn=False)
-    for t in range(n_steps):
-        r_out,_ = model.step(x[:, t])
-        if n_steps-t <= answer_step:
-            p = torch.softmax(r_out, dim=1)
-            error = (one_hot_label - p)*beta[t]
-            model.prop(error=error)
-            model.backwards()
-            if t%update_period==0:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=False)
-            avg_p = p + avg_p
-        else:
+    with torch.no_grad():
+        one_hot_label = F.one_hot(y, num_classes=10)
+        model.reset()
+        prex = torch.zeros(x.shape[0], 1).to(model.device)
+        for t in range(pad_steps):
+            r_out,_ = model.step(prex)
             model.prop(learn=False)
-    avg_p /= answer_step
-    total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
+        for t in range(n_steps):
+            r_out,_ = model.step(x[:, t])
+            if n_steps-t <= answer_step:
+                p = torch.softmax(r_out, dim=1)
+                error = (one_hot_label - p)*beta[t]
+                model.prop(error=error)
+                model.backwards()
+                if t%update_period==0:
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=False)
+                avg_p = p + avg_p
+            else:
+                model.prop(learn=False)
+        avg_p /= answer_step
+        total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
             
     return total_loss
 
 def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
     n_steps = x.shape[1]
     avg_p = 0.
-    one_hot_label = F.one_hot(y, num_classes=10)
-    model.reset()
-    #optimizer.zero_grad(set_to_none=False)
-    prex = torch.zeros(x.shape[0], 1).to(model.device)
-    for t in range(pad_steps):
-        r_out,_ = model.step(prex)
-        model.prop(learn=False)
-    for t in range(n_steps):
-        r_out,_ = model.step(x[:, t])
-        if n_steps-t <= answer_step:
-            p = torch.softmax(r_out, dim=1)
-            error = (one_hot_label - p)*beta[t]
-            model.prop(error=error)
-            model.backwards()
-            avg_p = p + avg_p
-        else:
+    with torch.no_grad():
+        one_hot_label = F.one_hot(y, num_classes=10)
+        model.reset()
+        #optimizer.zero_grad(set_to_none=False)
+        prex = torch.zeros(x.shape[0], 1).to(model.device)
+        for t in range(pad_steps):
+            r_out,_ = model.step(prex)
             model.prop(learn=False)
-    optimizer.step()
-
-    avg_p /= answer_step
-    total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
+        for t in range(n_steps):
+            r_out,_ = model.step(x[:, t])
+            if n_steps-t <= answer_step:
+                p = torch.softmax(r_out, dim=1)
+                error = (one_hot_label - p)*beta[t]
+                model.prop(error=error)
+                model.backwards()
+                avg_p = p + avg_p
+            else:
+                model.prop(learn=False)
+        optimizer.step()
+    
+        avg_p /= answer_step
+        total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
             
     return total_loss
 

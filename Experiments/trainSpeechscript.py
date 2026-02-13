@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--num_epochs", type=int, default=150)
     parser.add_argument("--answer_t", type=int, default=600)
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
     
@@ -51,15 +51,15 @@ if __name__ == "__main__":
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
-    parser.add_argument("--num_LP_layers", type=int, default=3)
+    parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[90, 120, 150, 150],)
-    parser.add_argument("--Ins_size", type=int, nargs="+", default=[150, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 16, 6],)
-    parser.add_argument("--Tau1", type=int, nargs="+", default=[4, 20],)
-    parser.add_argument("--Tau2", type=int, nargs="+", default=[5, 24, 48],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[3, 12., 36.],)
+        help="Hidden Low-pass layer sizes", default=[180, 240, 300, 300],)
+    parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 36, 6],)
+    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 10, 20],)
+    parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 12, 24],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[2, 16, 48.],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
@@ -218,9 +218,9 @@ if __name__ == "__main__":
         if args.method=='KP':
             model = buildKPNet(model_config, general_config).to(device)
         elif args.method=='GLE':
-            model = buildNetCompare(model_config, general_config, neurontype=args.method=='RFLO').to(device)
+            model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         elif args.method=='RFLO':
-            model = buildNetCompare(model_config, general_config, neurontype=args.method=='RFLO').to(device)
+            model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError
         
@@ -233,8 +233,8 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
-        factor=0.6,
-        patience=2
+        factor=0.5,
+        patience=0
     )
     
     beta = torch.zeros(n_steps).to(model.device)
@@ -247,18 +247,17 @@ if __name__ == "__main__":
     
     loss_record = []
     for epoch in range(train_config["num_epochs"]):
-        Cum_errors=0.
+        Cum_loss=0.
         pbar = tqdm(
             enumerate(train_loader, 0),
             total=train_config["batches_per_epoch"],
             disable=not general_config["verbose"],
         )
         for batch_idx, (x, target) in pbar:
-            # total_error = train_fn(model, optimizer, x.to(device),
-            #                             target.to(device), answer_steps, beta)
-            continue
-            Cum_errors += total_error
-        Cum_errors /= len(train_loader.dataset)
+            total_loss = train_fn(model, optimizer, x.to(device),
+                                        target.to(device), answer_steps, beta)
+            Cum_loss += total_loss
+        Cum_loss /= len(train_loader.dataset)
 
         val_acc, val_loss = test(model, val_loader, answer_steps, beta)
         scheduler.step(val_loss)
@@ -269,7 +268,7 @@ if __name__ == "__main__":
 
         print(
             f"Epoch: {epoch+1}, "
-            f'Train Loss: {Cum_errors:.4f},'
+            f'Train Loss: {Cum_loss:.4f},'
             f'Val Loss: {val_loss:.4f},'
             f'Val Acc: {val_acc:.1f},'
             f'Best Acc: {best_val_acc:.1f},'
@@ -279,7 +278,7 @@ if __name__ == "__main__":
         wandb.log(
             {
                 "epoch": epoch+1,
-                "train_loss": Cum_errors,
+                "train_loss": Cum_loss,
                 "val_loss": val_loss,
                 "val_acc": val_acc,
             }
