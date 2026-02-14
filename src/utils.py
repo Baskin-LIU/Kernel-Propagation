@@ -116,7 +116,7 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
                                           LP_size[i+1]//tau_uniq.shape[0]))
     layers = torch.nn.ModuleList()
 
-    if neurontype=='GLE':
+    if neurontype=='GLE' or neurontype=='BPTT':
         layer_fn = FwdGLENeurons  
     elif  neurontype=='RFLO':
         layer_fn = FwdRFNeurons

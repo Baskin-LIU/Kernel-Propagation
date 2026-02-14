@@ -37,7 +37,8 @@ default_train_config = {
     'learning_rate': 2e-2, 
     'batch_size': 256,
     'update_intervel': 200, #ms
-    'num_workers': 4, 
+    'num_workers': 4,
+    "balance_sampler":True,
     }
 
 default_model_config = {
@@ -100,6 +101,13 @@ class ShardedMelDataset(torch.utils.data.Dataset):
             self.shard_info = json.load(f)
 
         self.split_dir = split_dir
+
+        labels = []
+        for s in self.shard_info:
+            shard_labels = np.load(self.split_dir / s["label_file"])
+            labels.append(shard_labels)
+    
+        self.labels = np.concatenate(labels, dtype=np.int16)
 
         # store only paths (pickle-safe)
         self.mel_paths = [split_dir / s["mel_file"] for s in self.shard_info]
@@ -250,7 +258,7 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
         r_out,_ = model.step(x[:, :, t])
         if n_steps-t <= answer_step:
             p = torch.softmax(r_out, dim=1)
-            total_loss += -(y * torch.log(p)).mean()*beta[t]
+            total_loss += -(y * torch.log(p)).mean(dim=1).sum()*beta[t]
     total_loss.backward()
     optimizer.step()
     optimizer.zero_grad()
@@ -258,7 +266,33 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
     return total_loss.detach()
 
 
-labels = ['backward', 'bed', 'bird',
+def make_weighted_sampler(dataset, label_counts):
+    """
+    dataset.labels : list or 1D tensor of class indices
+    label_counts   : dict {class_id: count}
+    """
+
+    # inverse frequency per class
+    class_weights = {
+        LABELS.index(cls): 1.0 / count
+        for cls, count in label_counts.items()
+    }
+
+    sample_weights = torch.tensor(
+        [class_weights[int(label)] for label in dataset.labels],
+        dtype=torch.double
+    )
+
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True
+    )
+
+    return sampler
+
+
+LABELS = ['backward', 'bed', 'bird',
  'cat',
  'dog', 'down',
  'eight',
@@ -280,12 +314,12 @@ labels = ['backward', 'bed', 'bird',
 
 def label_to_index(word):
     # Return the position of the word in labels
-    return torch.tensor(labels.index(word))
+    return torch.tensor(LABELS.index(word))
 
 def index_to_label(index):
     # Return the word corresponding to the index in labels
     # This is the inverse of label_to_index
-    return labels[index]
+    return LABELS[index]
 
 class SubsetSC(SPEECHCOMMANDS):
     def __init__(self, subset: str = None):

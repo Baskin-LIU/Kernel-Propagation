@@ -39,11 +39,12 @@ if __name__ == "__main__":
     
     ### Training config
     parser.add_argument("--lr", type=float, default=1e-2)
-    parser.add_argument("--num_epochs", type=int, default=150)
-    parser.add_argument("--answer_t", type=int, default=600)
+    parser.add_argument("--num_epochs", type=int, default=66)
+    parser.add_argument("--answer_t", type=int, default=800)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
+    parser.add_argument("--balanced", type=bool, default=True)
     
 
     ### Data config
@@ -56,10 +57,10 @@ if __name__ == "__main__":
     parser.add_argument("--LP_size", type=int, nargs="+",
         help="Hidden Low-pass layer sizes", default=[180, 240, 300, 300],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 36, 6],)
-    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 10, 20],)
-    parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 12, 24],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[2, 16, 48.],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 60, 6],)
+    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 24, 40],)
+    parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 36, 80],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[5, 48., 200],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
@@ -111,6 +112,7 @@ if __name__ == "__main__":
     train_config["num_workers"] = args.workers
     train_config["method"] = args.method
     train_config["update_interval"] = args.update_interval
+    train_config["balance_sampler"] = args.balanced
     
     # Dataset Config
     dt = general_config["dt"]
@@ -157,7 +159,7 @@ if __name__ == "__main__":
     print("Data, model and training setup started...")
     # Create training and testing split of the data. We do not use validation in this tutorial.
     data_config["n_steps"] = int(data_config["duration"]/dt)
-    data_config["n_class"] = len(labels)
+    data_config["n_class"] = len(LABELS)
     n_class = data_config["n_class"]
     n_steps = data_config["n_steps"]
     answer_steps = int(model_config["answer_period"]/dt)
@@ -176,12 +178,21 @@ if __name__ == "__main__":
         pin_memory = False
     
     collate_fn = CollateMel(n_steps, n_class)
+
+    if train_config["balance_sampler"]:
+        with open(rootdir / "training"/ "label_stats.json") as f:
+            label_counts = json.load(f)["label_counts"]
+        sampler = make_weighted_sampler(train_set, label_counts)
+        shuffle = False
+    else:
+        sampler = None
+        shuffle = True
     
     train_loader = torch.utils.data.DataLoader(
         train_set,
         batch_size=train_config['batch_size'],
-        shuffle=True,
-        #sampler=sampler,
+        shuffle=shuffle,
+        sampler=sampler,
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=True,
@@ -208,7 +219,7 @@ if __name__ == "__main__":
 
     # Init network and optimizer
     if args.method=='BPTT':
-        model = buildKPNet(model_config, general_config).to(device)
+        model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         train_fn = train_batch_BPTT
     else:
         if args.update_interval==-1:
@@ -223,7 +234,8 @@ if __name__ == "__main__":
             model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError
-        
+
+    model = torch.compile(model)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=train_config["learning_rate"],
@@ -233,7 +245,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
-        factor=0.5,
+        factor=0.6,
         patience=0
     )
     

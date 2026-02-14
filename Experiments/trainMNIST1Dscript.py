@@ -162,8 +162,9 @@ if __name__ == "__main__":
     x_test, y_test = torch.tensor(data['x_test'],dtype=torch.float32).unsqueeze(-1), torch.tensor(data['y_test'], dtype=torch.int64)
 
     # init network and optimizer
+    # Init network and optimizer
     if args.method=='BPTT':
-        model = buildKPNet(model_config, general_config).to(device)
+        model = buildNetCompare(model_config, general_config, neurontype='GLE').to(device)
         train_fn = train_batch_BPTT
     else:
         if args.update_interval==-1:
@@ -178,6 +179,8 @@ if __name__ == "__main__":
             model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError
+
+    model = torch.compile(model)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
