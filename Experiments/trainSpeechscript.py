@@ -57,10 +57,10 @@ if __name__ == "__main__":
     parser.add_argument("--LP_size", type=int, nargs="+",
         help="Hidden Low-pass layer sizes", default=[180, 240, 300, 300],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 60, 6],)
-    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 24, 40],)
-    parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 36, 80],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[5, 48., 200],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 50, 6],)
+    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 12, 24],)
+    parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 16, 36],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[5, 48., 250],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
