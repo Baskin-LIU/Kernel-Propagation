@@ -34,7 +34,8 @@ default_model_config = {
     'n_in': 2, 
     'n_out': 3, 
     'num_LP_layers': 3, 
-    'num_Ins_layers': 1, 
+    'num_Ins_layers': 1,
+    'rho_scale': 0.6,
     'LP_size': (32, 50, 60), 
     'Ins_size': (60, 30), 
     'activation': 'tanh', 
@@ -111,7 +112,7 @@ def buildRLNet(model_config, general_config):
                 tau=tau[i+1], 
                 activation=model_config["activation"], 
                 dt=dt, 
-                scale=0.6,
+                scale=model_config["rho_scale"],
                 device=device,
             )
         )

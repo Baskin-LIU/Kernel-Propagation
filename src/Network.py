@@ -86,18 +86,19 @@ class DEFwdNetwork(FwdNetwork):
         totaln = 0
         for l in reversed(self.layers):
             l.downstream = totaln
-            if l.LP and l.previous_layer is not None:
-                tau_unique, inv = torch.unique(l.tau, sorted=False, return_inverse=True)
-                self.Tau.append(tau_unique)
-                n_tau = tau_unique.shape[0]
-                l.n_tau = n_tau
-                l.P_ = torch.zeros(l.n_neurons, n_tau)
-                l.P_[torch.arange(l.n_neurons), inv] = 1.
-                totaln += n_tau
-
+            if l.LP:
+                tau_unique, inv, repeat_tau = torch.unique(l.tau, sorted=False, return_inverse=True, return_counts=True)
                 l.register_buffer("tau_unique", tau_unique)
                 l.register_buffer("dt_tau_uniq", l.dt/l.tau_unique)
                 l.register_buffer("decay_uniq", 1 - l.dt_tau_uniq)
+                l.register_buffer("repeat_tau", repeat_tau)
+                n_tau = tau_unique.shape[0]
+                l.n_tau = n_tau
+                if l.previous_layer is not None:
+                    self.Tau.append(tau_unique)
+                    l.P_ = torch.zeros(l.n_neurons, n_tau)
+                    l.P_[torch.arange(l.n_neurons), inv] = 1.
+                    totaln += n_tau
 
         self.Tau = torch.hstack(self.Tau)
         print(self.Tau)

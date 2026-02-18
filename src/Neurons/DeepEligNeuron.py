@@ -5,7 +5,8 @@ from .rho import *
 class LastFwdDENeurons(FwdNeurons):
     # last layer of LP neurons before inst output to save computation  
     def step(self, r_in, noise=0.):
-        self.step_bar(r_in, noise)
+        #self.step_bar(r_in, noise)
+        self.step_uniq(r_in, noise)
         return self.r, self.u_bar
 
     def prop(self, learn=True):
@@ -29,15 +30,17 @@ class LastFwdDENeurons(FwdNeurons):
         self.bias.grad -= self.epsilon.mean(0)
 
     def reset(self,):
-        super().reset()
-        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
+        super().reset_uniq()
+        #super().reset_bar()
+        #self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
         
 
 
 class FwdDENeurons(FwdNeurons):
     
     def step(self, r_in, noise=0.):
-        self.step_bar(r_in, noise)
+        #self.step_bar(r_in, noise)
+        self.step_uniq(r_in, noise)
         return self.r, self.u_bar
 
     def prop(self, learn=True):
@@ -69,19 +72,16 @@ class FwdDENeurons(FwdNeurons):
         self.bias.grad -= (K * self.elig_b).sum(axis=1).mean(dim=0)
 
     def reset(self,):
-        super().reset()
-        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
+        # super().reset()
+        # self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
+        super().reset_uniq()
+        #super().reset_bar()
         self.elig = torch.zeros(1,self.downstream,self.n_neurons,self.n_in).to(self.device)
         self.elig_b = torch.zeros(1, self.downstream, self.n_neurons).to(self.device)
 
 
 ##TODO Reduced version. r_bar in hidden neurons with same tau can be shared. Which can also be used for forwarding W r_bar.
 class FwdDENeuronsReduced(FwdDENeurons):
-
-    def custom_init(self, ):
-        _, repeat_tau = torch.unique(self.tau, sorted=False, return_counts=True)
-        self.register_buffer("repeat_tau", repeat_tau)
-
     
     def step(self, r_in, noise=0., **kwargs):
         self.r_in = r_in

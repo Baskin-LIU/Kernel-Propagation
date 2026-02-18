@@ -57,7 +57,7 @@ def buildKPNet(model_config, general_config):
                     tau=tau[i+1], 
                     activation=model_config["activation"], 
                     dt=dt, 
-                    scale=0.6,
+                    scale=model_config["rho_scale"],# 0.6,
                     device=device,
                 )
             )

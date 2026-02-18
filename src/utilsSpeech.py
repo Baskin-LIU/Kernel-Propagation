@@ -28,7 +28,7 @@ default_data_config = {
     'n_fft': 400,
     'win_length': 400,
     'hop_length': 64,
-    'n_mels': 48,
+    'n_mels': 64,
     'duration': 1000, #ms
     }
 
@@ -45,7 +45,8 @@ default_model_config = {
     'n_in': 48, 
     'n_out': 35, 
     'num_LP_layers': 3, 
-    'num_Ins_layers': 1, 
+    'num_Ins_layers': 1,
+    'rho_scale': 0.6,
     'LP_size': [90, 120, 150], 
     'Ins_size': [150, ], 
     'activation': 'tanh', 

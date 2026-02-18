@@ -44,6 +44,7 @@ default_model_config = {
     'n_out': 10, 
     'num_LP_layers': 4, 
     'num_Ins_layers': 1, 
+    'rho_scale': 0.6,   
     'LP_size': [60, 90, 90, 90], 
     'Ins_size': [120, ], 
     'activation': 'tanh', 

@@ -87,7 +87,6 @@ class Neurons(torch.nn.Module):
 
 
 
-
 class FwdNeurons(Neurons):
     
     def __init__(self, n_in, n_neurons, bias=None, activation='linear', tau=20., lr_w=1e-2, 
@@ -111,13 +110,19 @@ class FwdNeurons(Neurons):
         self.u_bar = (self.r_bar*self.W_in).sum(-1) + self.bias
         
         self.r = self.rho(self.u_bar)
+
+    def step_uniq(self, r_in, noise=0.):
+        self.r_bar_uniq = self.decay_uniq[None, :, None] * self.r_bar_uniq + self.dt_tau_uniq[None, :, None] * r_in[:, None, :]
+        self.r_bar = torch.repeat_interleave(self.r_bar_uniq, self.repeat_tau, dim=1)
+        self.u_bar = (self.r_bar*self.W_in).sum(-1) + self.bias
+        
+        self.r = self.rho(self.u_bar)
     
     def prop(self, learn=True):
         self.epsilon = self.wTe * self.rho.d
         if learn and self.previous_layer is not None:
             self.previous_layer[0].wTe = self.epsilon @ self.W_in
         return 0, 0
-        
         
     def learnW(self, update=True):    
         self.dW_in += (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
@@ -153,7 +158,13 @@ class FwdNeurons(Neurons):
         self.W_in.grad = torch.zeros(self.n_neurons, self.n_in)
         self.bias.grad = torch.zeros(self.n_neurons)
         
+    def reset_bar(self,):
+        super().reset()
+        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
 
+    def reset_uniq(self,):
+        super().reset()
+        self.r_bar_uniq = torch.zeros(1, self.n_tau, self.n_in).to(self.device)
         
 
 class FwdInsNeurons(FwdNeurons):

@@ -39,13 +39,12 @@ if __name__ == "__main__":
     
     ### Training config
     parser.add_argument("--lr", type=float, default=1e-2)
-    parser.add_argument("--num_epochs", type=int, default=66)
-    parser.add_argument("--answer_t", type=int, default=800)
+    parser.add_argument("--num_epochs", type=int, default=50)
+    parser.add_argument("--answer_t", type=int, default=600)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
     parser.add_argument("--balanced", type=bool, default=True)
-    
 
     ### Data config
     parser.add_argument("--batch", type=int, default=256)
@@ -55,12 +54,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[180, 240, 300, 300],)
+        help="Hidden Low-pass layer sizes", default=[180, 240, 300, 330],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
     parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 50, 6],)
     parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 12, 24],)
     parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 16, 36],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[5, 48., 250],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[10, 60., 360],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
