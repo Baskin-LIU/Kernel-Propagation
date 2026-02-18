@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import os
 import json
+from pathlib import Path
 from Neurons.FwdNeuron import *
 from Neurons.DeepEligNeuron import *
 from Network import *
@@ -10,6 +11,25 @@ from inputFuc import *
 from torch.utils.data import Dataset
 from torchaudio.datasets import SPEECHCOMMANDS
 
+LABELS = ['backward', 'bed', 'bird',
+ 'cat',
+ 'dog', 'down',
+ 'eight',
+ 'five', 'follow', 'forward', 'four',
+ 'go',
+ 'happy', 'house',
+ 'learn', 'left',
+ 'marvin',
+ 'nine', 'no',
+ 'off', 'on', 'one',
+ 'right',
+ 'seven', 'sheila', 'six', 'stop',
+ 'three', 'tree', 'two',
+ 'up',
+ 'visual',
+ 'wow',
+ 'yes',
+ 'zero']
 
 ### DEFAULT Config ####
 default_general_config = {
@@ -56,41 +76,6 @@ default_model_config = {
     'Tau2': [5, 24, 48],
     "answer_period": 800,
     }
-
-from pathlib import Path
-import torch
-
-
-# class ShardedMelDataset(torch.utils.data.Dataset):
-#     def __init__(self, split_dir):
-
-#         split_dir = Path(split_dir)
-
-#         with open(split_dir / "shard_index.json") as f:
-#             shard_info = json.load(f)
-
-#         self.shards = []
-#         self.cum_sizes = []
-
-#         total = 0
-#         for s in shard_info:
-#             mel = np.load(split_dir / s["mel_file"], mmap_mode="r")
-#             lab = np.load(split_dir / s["label_file"], mmap_mode="r")
-#             self.shards.append((mel, lab))
-#             total += len(lab)
-#             self.cum_sizes.append(total)
-
-#     def __len__(self):
-#         return self.cum_sizes[-1]
-
-#     def __getitem__(self, idx):
-
-#         shard_id = np.searchsorted(self.cum_sizes, idx, side="right")
-#         prev = 0 if shard_id == 0 else self.cum_sizes[shard_id - 1]
-#         local_idx = idx - prev
-
-#         mel, lab = self.shards[shard_id]
-#         return torch.from_numpy(mel[local_idx]), torch.tensor(lab[local_idx])
 
 
 class ShardedMelDataset(torch.utils.data.Dataset):
@@ -142,13 +127,46 @@ class ShardedMelDataset(torch.utils.data.Dataset):
         local_idx = idx - prev
 
         x = torch.tensor(self._mels[shard_id][local_idx])
-        y = torch.tensor(self._labels[shard_id][local_idx])
+        y = torch.tensor(self._labels[shard_id][local_idx])        
         return x, y
 
 class CollateMel:
-    def __init__(self, target_time_steps: int, n_class: int):
+    def __init__(self, target_time_steps: int, n_class: int, training=False, max_shift=4, mask_width=5, mask_width_fre=4):
         self.target_T = target_time_steps
         self.n_class = n_class
+
+        self.training = training
+        self.max_shift = max_shift
+        self.mask_width = mask_width
+        self.mask_width_fre = mask_width_fre
+
+    def _augment(self, mel):
+        n_mel, T = mel.shape
+        mean_val = mel.mean(dim=1, keepdim=True)  # [n_mels, 1]
+        #Temporal mask
+        start = random.randint(0, T - self.mask_width)
+        mel[:, start:start + self.mask_width] = mean_val
+        start = random.randint(0, T - self.mask_width) #second mask window
+        mel[:, start:start + self.mask_width] = mean_val
+
+        #Frequency mask
+        start = random.randint(0, n_mel - self.mask_width_fre)
+        mel[start:start + self.mask_width_fre, :] = mean_val[start:start + self.mask_width_fre]
+        
+        #Temporal shift
+        shift = random.randint(-self.max_shift, self.max_shift)
+        if shift == 0:
+            return mel
+        if shift > 0:
+            # shift right
+            pad = mean_val.expand(-1, shift)
+            mel = torch.cat([pad, mel[:, :-shift]], dim=1)
+        else:
+            # shift left
+            shift = abs(shift)
+            pad = mean_val.expand(-1, shift)
+            mel = torch.cat([mel[:, shift:], pad], dim=1)
+        return mel
 
     def __call__(self, batch):
         """
@@ -162,6 +180,8 @@ class CollateMel:
         resized = []
         for mel in mels:
             # mel: [n_mels, T]
+            if self.training:
+                mel = self._augment(mel)
             mel = mel.unsqueeze(0) # [1, n_mels, T]
             mel = F.interpolate(
                 mel,
@@ -251,6 +271,70 @@ def test(model, data_loader, answer_step, beta):
 
     return acc_p, loss
 
+
+def test_analy(model, data_loader, answer_step, beta, num_classes=35, eps=1e-12):
+    model.eval()
+    device = model.device
+    num_sample = len(data_loader.dataset)
+
+    loss, correct = 0., 0
+
+    # confusion stats
+    TP = torch.zeros(num_classes, device=device)
+    FP = torch.zeros(num_classes, device=device)
+    FN = torch.zeros(num_classes, device=device)
+
+    with torch.no_grad():
+        for x_test, y_test in data_loader:
+            x_test = x_test.to(device)
+            y_test = y_test.to(device)
+
+            y_true = torch.argmax(y_test, dim=1)
+            n_steps = x_test.shape[-1]
+
+            model.reset()
+            pred_p = 0.
+
+            for t in range(n_steps):
+                r_out, _ = model.step(x_test[:, :, t])
+                if n_steps - t <= answer_step:
+                    p = torch.softmax(r_out, dim=1)
+                    pred_p = pred_p + p * beta[t]
+
+            prediction = torch.argmax(pred_p, dim=1)
+
+            # ---- loss and accuracy ----
+            loss += -(y_test * torch.log(pred_p + eps)).mean(dim=1).sum().item()
+            correct += (prediction == y_true).sum().item()
+
+            # ---- per-class stats ----
+            for c in range(num_classes):
+                pred_is_c = (prediction == c)
+                true_is_c = (y_true == c)
+
+                TP[c] += (pred_is_c & true_is_c).sum()
+                FP[c] += (pred_is_c & ~true_is_c).sum()
+                FN[c] += (~pred_is_c & true_is_c).sum()
+
+    loss /= num_sample
+    acc_p = correct * 100 / num_sample
+
+    # ---- metrics ----
+    recall = TP / (TP + FN + eps)
+    precision = TP / (TP + FP + eps)
+    f1 = 2 * precision * recall / (precision + recall + eps)
+
+    per_class = {
+        "TP": TP.cpu(),
+        "FP": FP.cpu(),
+        "FN": FN.cpu(),
+        "recall": recall.cpu(),
+        "precision": precision.cpu(),
+        "f1": f1.cpu(),
+    }
+
+    return acc_p, loss, per_class
+
 def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
     n_steps = x.shape[-1]
     model.reset()
@@ -291,27 +375,6 @@ def make_weighted_sampler(dataset, label_counts):
     )
 
     return sampler
-
-
-LABELS = ['backward', 'bed', 'bird',
- 'cat',
- 'dog', 'down',
- 'eight',
- 'five', 'follow', 'forward', 'four',
- 'go',
- 'happy', 'house',
- 'learn', 'left',
- 'marvin',
- 'nine', 'no',
- 'off', 'on', 'one',
- 'right',
- 'seven', 'sheila', 'six', 'stop',
- 'three', 'tree', 'two',
- 'up',
- 'visual',
- 'wow',
- 'yes',
- 'zero']
 
 def label_to_index(word):
     # Return the position of the word in labels

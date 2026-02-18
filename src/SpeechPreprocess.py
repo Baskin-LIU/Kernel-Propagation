@@ -175,7 +175,10 @@ def process_split_sharded(
 
         T = waveform.size(1)
         if T < Target_len:
-            waveform = F.pad(waveform, (0, Target_len - T))
+            pad_len = Target_len - T
+            pre = pad_len//2
+            post = pad_len - pre
+            waveform = F.pad(waveform, (pre, post))
         else:
             waveform = waveform[:, :Target_len]
 
@@ -224,8 +227,8 @@ if __name__ == "__main__":
     ### General config
     parser.add_argument("--rewrite", dest="rewrite", action="store_true")
     parser.add_argument("--sample_rate", type=int, default=16000)
-    parser.add_argument("--n_frames", type=int, default=250)
-    parser.add_argument("--n_mels", type=int, default=48)
+    parser.add_argument("--n_frames", type=int, default=200)
+    parser.add_argument("--n_mels", type=int, default=64)
     parser.add_argument("--duration", type=float, default=1.)
     
     parser.set_defaults(rewrite=False)

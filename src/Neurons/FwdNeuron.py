@@ -171,7 +171,6 @@ class FwdInsNeurons(FwdNeurons):
     
     def custom_init(self,):
         self.tau = torch.zeros(self.n_neurons)
-        
 
     def step(self, r_in, noise=0., **kwargs):
         self.r_in=r_in
@@ -198,7 +197,6 @@ class FwdGLENeurons(FwdNeurons):
         if self.previous_layer != None:
             self.previous_layer[0].wTe = self.mismatch @ self.W_in
         return 0, 0
-
         
     def learnW(self, update=True):
         dW_in = (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
@@ -211,7 +209,8 @@ class FwdGLENeurons(FwdNeurons):
 
     def reset(self,):
         super().reset()
-        self.epsilon_past = torch.zeros(1, self.n_neurons)
+        self.epsilon = torch.zeros(1, self.n_neurons).to(self.device)
+        self.epsilon_past = torch.zeros(1, self.n_neurons).to(self.device)
 
         
 
@@ -241,7 +240,7 @@ class FwdRFNeurons(FwdNeurons):
 
     def reset(self,):
         super().reset()
-        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in)
+        self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
 
 
         

@@ -33,7 +33,7 @@ if __name__ == "__main__":
     ### General config
     parser.add_argument("--short_run", dest="short_run", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--dt", type=float, default=1.) #ms
+    parser.add_argument("--dt", type=float, default=2.) #ms
     parser.add_argument("--visual_kernel", dest="visual_kernel", action="store_true")
     #parser.add_argument("--machine", type=str, default="MLcloud")
     
@@ -54,12 +54,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[180, 240, 300, 330],)
+        help="Hidden Low-pass layer sizes", default=[180, 240, 300, 320],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
     parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 50, 6],)
     parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 12, 24],)
     parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 16, 36],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[10, 60., 360],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[10, 60., 320, 500],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
@@ -117,44 +117,6 @@ if __name__ == "__main__":
     dt = general_config["dt"]
     answer_steps = int(model_config["answer_period"]/dt)
 
-    ########## Logging Config ##########
-    print("Wandb configuration started...")
-
-    # setup directory for saving training artefacts
-    temporary_dir = tempfile.TemporaryDirectory()
-    artefacts_dir = Path(temporary_dir.name) / "training_artefacts"
-    os.makedirs(str(artefacts_dir))
-
-    # wandb config
-    api_key_file = Path("~/.wandbAPIkey.txt").expanduser().resolve()
-    project_name = "KPSpeech"
-    group_name = args.group_name + args.method
-
-    # login to wandb
-    with open(api_key_file, "r") as file:
-        api_key = file.read().strip()
-    wandb.login(key=api_key)
-
-    # initialize wandb
-    wandb.init(project=project_name, group=group_name, config={})
-
-    with open(str(artefacts_dir / "general_config.json"), "w", encoding="utf-8") as f:
-        json.dump(general_config, f, ensure_ascii=False, indent=4, sort_keys=True)
-    with open(str(artefacts_dir / "data_config.json"), "w", encoding="utf-8") as f:
-        json.dump(data_config, f, ensure_ascii=False, indent=4, sort_keys=True)
-    with open(str(artefacts_dir / "model_config.json"), "w", encoding="utf-8") as f:
-        json.dump(model_config, f, ensure_ascii=False, indent=4, sort_keys=True)
-    with open(str(artefacts_dir / "train_config.json"), "w", encoding="utf-8") as f:
-        json.dump(train_config, f, ensure_ascii=False, indent=4, sort_keys=True)
-    wandb.config.update(
-        {
-            "general_config": general_config,
-            "data_config": data_config,
-            "model_config": model_config,
-            "train_config": train_config,
-        }
-    )
-
     print("Data, model and training setup started...")
     # Create training and testing split of the data. We do not use validation in this tutorial.
     data_config["n_steps"] = int(data_config["duration"]/dt)
@@ -168,6 +130,7 @@ if __name__ == "__main__":
     val_set = ShardedMelDataset(rootdir / 'validation')
     
     mel_sample, label = val_set[0]
+    data_config['n_mels'] = mel_sample.shape[0]
     
     if device == "cuda":
         num_workers = train_config['num_workers']
@@ -175,8 +138,6 @@ if __name__ == "__main__":
     else:
         num_workers = 0
         pin_memory = False
-    
-    collate_fn = CollateMel(n_steps, n_class)
 
     if train_config["balance_sampler"]:
         with open(rootdir / "training"/ "label_stats.json") as f:
@@ -192,7 +153,7 @@ if __name__ == "__main__":
         batch_size=train_config['batch_size'],
         shuffle=shuffle,
         sampler=sampler,
-        collate_fn=collate_fn,
+        collate_fn=CollateMel(n_steps, n_class, training=True),
         num_workers=num_workers,
         pin_memory=True,
     )
@@ -202,7 +163,7 @@ if __name__ == "__main__":
         batch_size=512,
         shuffle=False,
         drop_last=False,
-        collate_fn=collate_fn,
+        collate_fn=CollateMel(n_steps, n_class, training=False),
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
@@ -244,8 +205,8 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
-        factor=0.6,
-        patience=0
+        factor=0.5,
+        patience=1
     )
     
     beta = torch.zeros(n_steps).to(model.device)
@@ -254,6 +215,45 @@ if __name__ == "__main__":
     
     best_val_acc = 0.
 
+    ########## Wandb Logging Config ##########
+    print("Wandb configuration started...")
+
+    # setup directory for saving training artefacts
+    temporary_dir = tempfile.TemporaryDirectory()
+    artefacts_dir = Path(temporary_dir.name) / "training_artefacts"
+    os.makedirs(str(artefacts_dir))
+
+    # wandb config
+    api_key_file = Path("~/.wandbAPIkey.txt").expanduser().resolve()
+    project_name = "KPSpeech"
+    group_name = args.group_name + args.method
+
+    # login to wandb
+    with open(api_key_file, "r") as file:
+        api_key = file.read().strip()
+    wandb.login(key=api_key)
+
+    # initialize wandb
+    wandb.init(project=project_name, group=group_name, config={})
+
+    with open(str(artefacts_dir / "general_config.json"), "w", encoding="utf-8") as f:
+        json.dump(general_config, f, ensure_ascii=False, indent=4, sort_keys=True)
+    with open(str(artefacts_dir / "data_config.json"), "w", encoding="utf-8") as f:
+        json.dump(data_config, f, ensure_ascii=False, indent=4, sort_keys=True)
+    with open(str(artefacts_dir / "model_config.json"), "w", encoding="utf-8") as f:
+        json.dump(model_config, f, ensure_ascii=False, indent=4, sort_keys=True)
+    with open(str(artefacts_dir / "train_config.json"), "w", encoding="utf-8") as f:
+        json.dump(train_config, f, ensure_ascii=False, indent=4, sort_keys=True)
+    wandb.config.update(
+        {
+            "general_config": general_config,
+            "data_config": data_config,
+            "model_config": model_config,
+            "train_config": train_config,
+        }
+    )
+
+    ######## Training #############################
     print("Training started...")
     
     loss_record = []
@@ -310,7 +310,7 @@ if __name__ == "__main__":
         batch_size=512,
         shuffle=False,
         drop_last=False,
-        collate_fn=collate_fn,
+        collate_fn=CollateMel(n_steps, n_class, training=False),
         num_workers=num_workers,
         pin_memory=True,
     )
