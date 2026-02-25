@@ -38,9 +38,9 @@ if __name__ == "__main__":
     #parser.add_argument("--machine", type=str, default="MLcloud")
     
     ### Training config
-    parser.add_argument("--lr", type=float, default=1e-2)
-    parser.add_argument("--num_epochs", type=int, default=50)
-    parser.add_argument("--answer_t", type=int, default=600)
+    parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--num_epochs", type=int, default=60)
+    parser.add_argument("--answer_t", type=int, default=640)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
@@ -48,6 +48,10 @@ if __name__ == "__main__":
 
     ### Data config
     parser.add_argument("--batch", type=int, default=256)
+    parser.add_argument("--mask", type=int, default=0)
+    parser.add_argument("--mask_fre", type=int, default=4)
+    parser.add_argument("--warp", type=int, default=12)
+    
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
@@ -59,7 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 50, 6],)
     parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 12, 24],)
     parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 16, 36],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[10, 60., 320, 500],)
+    parser.add_argument("--Tau3", type=int, nargs="+", default=[20, 100., 320, 800],)
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
     
@@ -119,8 +123,11 @@ if __name__ == "__main__":
 
     print("Data, model and training setup started...")
     # Create training and testing split of the data. We do not use validation in this tutorial.
+    data_config["mask_width"] = args.mask
+    data_config["mask_width_fre"] = args.mask_fre
+    data_config["warp"] = args.warp
     data_config["n_steps"] = int(data_config["duration"]/dt)
-    data_config["n_class"] = len(LABELS)
+    data_config["n_class"] = len(COMMAND20)
     n_class = data_config["n_class"]
     n_steps = data_config["n_steps"]
     answer_steps = int(model_config["answer_period"]/dt)
@@ -153,7 +160,10 @@ if __name__ == "__main__":
         batch_size=train_config['batch_size'],
         shuffle=shuffle,
         sampler=sampler,
-        collate_fn=CollateMel(n_steps, n_class, training=True),
+        collate_fn=CollateMel(n_steps, n_class, training=True, 
+                              mask_width=data_config["mask_width"], 
+                              mask_width_fre=data_config["mask_width_fre"],
+                              max_warp = data_config["warp"],),
         num_workers=num_workers,
         pin_memory=True,
     )

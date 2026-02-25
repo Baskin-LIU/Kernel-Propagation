@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+import numpy.random as random
 import os
 import json
 from pathlib import Path
@@ -31,6 +32,12 @@ LABELS = ['backward', 'bed', 'bird',
  'yes',
  'zero']
 
+COMMAND20 = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'nine', 'eight',
+             'yes', 'no', 'up', 'down', 'left', 'right', 'on', 'off', 'stop', 'go', 'Unknown']
+
+INDEX20 = [20, 20, 20, 20, 20, 13, 9, 5, 20, 20, 4, 19, 20, 20, 20, 14, 20, 8, 11, 17, 16, 1, 15, 7, 20, 6, 18, 3, 20, 2, 12, 20, 20, 10, 0]
+
+
 ### DEFAULT Config ####
 default_general_config = {
     'seed': 0, 
@@ -47,16 +54,16 @@ default_data_config = {
     'preprocessing':'Mel',
     'n_fft': 400,
     'win_length': 400,
-    'hop_length': 64,
+    'hop_length': 80,
     'n_mels': 64,
     'duration': 1000, #ms
     }
 
 default_train_config = {
     'num_epochs': 150, 
-    'learning_rate': 2e-2, 
+    'learning_rate': 2e-3, 
     'batch_size': 256,
-    'update_intervel': 200, #ms
+    'update_interval': 200, #ms
     'num_workers': 4,
     "balance_sampler":True,
     }
@@ -71,9 +78,9 @@ default_model_config = {
     'Ins_size': [150, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
-    'Tau0': [default_general_config['dt'], 16, 6], 
-    'Tau1': [4, 20], 
-    'Tau2': [5, 24, 48],
+    'Tau0': [default_general_config['dt'], 50, 6], 
+    'Tau1': [3, 12, 24], 
+    'Tau2': [4, 16, 48],
     "answer_period": 800,
     }
 
@@ -91,9 +98,16 @@ class ShardedMelDataset(torch.utils.data.Dataset):
         labels = []
         for s in self.shard_info:
             shard_labels = np.load(self.split_dir / s["label_file"])
+
+            Shard_labels = []
+            for label in shard_labels:
+                Shard_labels.append(INDEX20[int(label)])
+            shard_labels = np.array(Shard_labels)
+            
             labels.append(shard_labels)
     
         self.labels = np.concatenate(labels, dtype=np.int16)
+        
 
         # store only paths (pickle-safe)
         self.mel_paths = [split_dir / s["mel_file"] for s in self.shard_info]
@@ -127,11 +141,13 @@ class ShardedMelDataset(torch.utils.data.Dataset):
         local_idx = idx - prev
 
         x = torch.tensor(self._mels[shard_id][local_idx])
-        y = torch.tensor(self._labels[shard_id][local_idx])        
+        y = self._labels[shard_id][local_idx]
+        y = torch.tensor(INDEX20[y])
         return x, y
 
 class CollateMel:
-    def __init__(self, target_time_steps: int, n_class: int, training=False, max_shift=4, mask_width=5, mask_width_fre=4):
+    def __init__(self, target_time_steps: int, n_class: int, training=False, 
+                 max_shift=3, mask_width=0, mask_width_fre=4, max_warp=10,):
         self.target_T = target_time_steps
         self.n_class = n_class
 
@@ -139,33 +155,62 @@ class CollateMel:
         self.max_shift = max_shift
         self.mask_width = mask_width
         self.mask_width_fre = mask_width_fre
+        self.max_warp = max_warp
 
     def _augment(self, mel):
         n_mel, T = mel.shape
         mean_val = mel.mean(dim=1, keepdim=True)  # [n_mels, 1]
         #Temporal mask
-        start = random.randint(0, T - self.mask_width)
-        mel[:, start:start + self.mask_width] = mean_val
-        start = random.randint(0, T - self.mask_width) #second mask window
-        mel[:, start:start + self.mask_width] = mean_val
+        #start = random.randint(0, T - self.mask_width)
+        #mel[:, start:start + self.mask_width] = mean_val
 
         #Frequency mask
         start = random.randint(0, n_mel - self.mask_width_fre)
         mel[start:start + self.mask_width_fre, :] = mean_val[start:start + self.mask_width_fre]
         
         #Temporal shift
-        shift = random.randint(-self.max_shift, self.max_shift)
-        if shift == 0:
-            return mel
-        if shift > 0:
-            # shift right
-            pad = mean_val.expand(-1, shift)
-            mel = torch.cat([pad, mel[:, :-shift]], dim=1)
-        else:
-            # shift left
-            shift = abs(shift)
-            pad = mean_val.expand(-1, shift)
-            mel = torch.cat([mel[:, shift:], pad], dim=1)
+        #shift = random.randint(-self.max_shift, self.max_shift)
+        # if shift == 0:
+        #     return mel
+        # if shift > 0:
+        #     # shift right
+        #     pad = mean_val.expand(-1, shift)
+        #     mel = torch.cat([pad, mel[:, :-shift]], dim=1)
+        # else:
+        #     # shift left
+        #     shift = abs(shift)
+        #     pad = mean_val.expand(-1, shift)
+        #     mel = torch.cat([mel[:, shift:], pad], dim=1)
+
+        shift_left = random.randint(0, self.max_shift)
+        shift_right = random.randint(1, self.max_shift)
+        # pick pivot away from borders
+        center = random.randint(low=80, high=120)
+    
+        # random displacement
+        warp = random.randint(-self.max_warp, self.max_warp + 1)
+        new_center = int(center*2.5) + warp
+    
+        # split
+        left = mel[:, shift_left:center]
+        right = mel[:, center:-shift_right]
+
+        # resample each part
+        left = F.interpolate(
+            left.unsqueeze(0),
+            size=new_center,
+            mode="linear",
+            align_corners=False
+        )
+    
+        right = F.interpolate(
+            right.unsqueeze(0),
+            size=self.target_T - new_center,
+            mode="linear",
+            align_corners=False
+        )
+        mel = torch.cat([left, right], dim=-1)
+
         return mel
 
     def __call__(self, batch):
@@ -182,13 +227,14 @@ class CollateMel:
             # mel: [n_mels, T]
             if self.training:
                 mel = self._augment(mel)
-            mel = mel.unsqueeze(0) # [1, n_mels, T]
-            mel = F.interpolate(
-                mel,
-                size=self.target_T,
-                mode="linear",
-                align_corners=False
-            )
+            else:
+                mel = mel.unsqueeze(0) # [1, n_mels, T]
+                mel = F.interpolate(
+                    mel,
+                    size=self.target_T,
+                    mode="linear",
+                    align_corners=False
+                )
             resized.append(mel.squeeze(0))
 
         mels = torch.stack(resized)
@@ -274,8 +320,8 @@ def test(model, data_loader, answer_step, beta):
 
 def test_analy(model, data_loader, answer_step, beta, num_classes=35, eps=1e-12):
     model.eval()
-    device = model.device
     num_sample = len(data_loader.dataset)
+    device = model.device
 
     loss, correct = 0., 0
 
@@ -358,11 +404,25 @@ def make_weighted_sampler(dataset, label_counts):
     """
 
     # inverse frequency per class
-    class_weights = {
-        LABELS.index(cls): 1.0 / count
+    # class_weights = {
+    #     LABELS.index(cls): 1.0 / count
+    #     for cls, count in label_counts.items()
+    # }
+
+    # sample_weights = torch.tensor(
+    #     [class_weights[int(label)] for label in dataset.labels],
+    #     dtype=torch.double
+    # )
+
+    class_number = {
+        LABELS.index(cls): count
         for cls, count in label_counts.items()
     }
 
+    class_number20 = torch.zeros(21)
+    for word in class_number.keys():
+        class_number20[INDEX20[word]] += class_number[word]
+    class_weights = 1.0/class_number20
     sample_weights = torch.tensor(
         [class_weights[int(label)] for label in dataset.labels],
         dtype=torch.double
