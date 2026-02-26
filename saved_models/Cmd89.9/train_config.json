@@ -1,0 +1,11 @@
+{
+    "balance_sampler": false,
+    "batch_size": 256,
+    "batches_per_epoch": 332,
+    "learning_rate": 0.005,
+    "method": "BPTT",
+    "num_epochs": 60,
+    "num_workers": 4,
+    "update_interval": -1,
+    "weighted_sampler": false
+}

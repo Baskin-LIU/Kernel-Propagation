@@ -49,13 +49,13 @@ default_general_config = {
     }
 
 default_data_config = {
-    'n_class':35, 
+    'n_class':21, 
     'sample_rate':16000,
     'preprocessing':'Mel',
     'n_fft': 400,
     'win_length': 400,
-    'hop_length': 80,
-    'n_mels': 64,
+    'hop_length': 100,
+    'n_mels': 80,
     'duration': 1000, #ms
     }
 
@@ -65,7 +65,7 @@ default_train_config = {
     'batch_size': 256,
     'update_interval': 200, #ms
     'num_workers': 4,
-    "balance_sampler":True,
+    "weighted_sampler":False,
     }
 
 default_model_config = {
@@ -87,27 +87,27 @@ default_model_config = {
 
 class ShardedMelDataset(torch.utils.data.Dataset):
 
-    def __init__(self, split_dir):
+    def __init__(self, split_dir, task='Cmd20'):
         split_dir = Path(split_dir)
 
         with open(split_dir / "shard_index.json") as f:
             self.shard_info = json.load(f)
 
         self.split_dir = split_dir
+        self.task = task
 
         labels = []
         for s in self.shard_info:
             shard_labels = np.load(self.split_dir / s["label_file"])
 
-            Shard_labels = []
-            for label in shard_labels:
-                Shard_labels.append(INDEX20[int(label)])
-            shard_labels = np.array(Shard_labels)
+            # Shard_labels = []
+            # for label in shard_labels:
+            #     Shard_labels.append(INDEX20[int(label)])
+            # shard_labels = np.array(Shard_labels)
             
             labels.append(shard_labels)
     
         self.labels = np.concatenate(labels, dtype=np.int16)
-        
 
         # store only paths (pickle-safe)
         self.mel_paths = [split_dir / s["mel_file"] for s in self.shard_info]
@@ -142,8 +142,12 @@ class ShardedMelDataset(torch.utils.data.Dataset):
 
         x = torch.tensor(self._mels[shard_id][local_idx])
         y = self._labels[shard_id][local_idx]
-        y = torch.tensor(INDEX20[y])
+        if self.task=='Full':
+            y = torch.tensor(y)
+        elif self.task=='Cmd20':
+            y = torch.tensor(INDEX20[y])
         return x, y
+        
 
 class CollateMel:
     def __init__(self, target_time_steps: int, n_class: int, training=False, 
@@ -167,29 +171,16 @@ class CollateMel:
         #Frequency mask
         start = random.randint(0, n_mel - self.mask_width_fre)
         mel[start:start + self.mask_width_fre, :] = mean_val[start:start + self.mask_width_fre]
-        
-        #Temporal shift
-        #shift = random.randint(-self.max_shift, self.max_shift)
-        # if shift == 0:
-        #     return mel
-        # if shift > 0:
-        #     # shift right
-        #     pad = mean_val.expand(-1, shift)
-        #     mel = torch.cat([pad, mel[:, :-shift]], dim=1)
-        # else:
-        #     # shift left
-        #     shift = abs(shift)
-        #     pad = mean_val.expand(-1, shift)
-        #     mel = torch.cat([mel[:, shift:], pad], dim=1)
 
+        #Temporal shift
         shift_left = random.randint(0, self.max_shift)
         shift_right = random.randint(1, self.max_shift)
         # pick pivot away from borders
-        center = random.randint(low=80, high=120)
+        center = random.randint(low=70, high=90)
     
         # random displacement
         warp = random.randint(-self.max_warp, self.max_warp + 1)
-        new_center = int(center*2.5) + warp
+        new_center = int(center*3.125) + warp
     
         # split
         left = mel[:, shift_left:center]
@@ -270,13 +261,16 @@ def train_batch_periodic(model, optimizer, x, y, answer_step, beta, update_perio
 def train_batch_delay(model, optimizer, x, y, answer_step, beta):
     n_steps = x.shape[-1]
     avg_p = 0.
+    class_weight = torch.ones(21).to(model.device)
+    class_weight[-1] = 0.6
+    sample_weight = (y*class_weight).sum(1).unsqueeze(-1)
     with torch.no_grad():
         model.reset()
         for t in range(n_steps):
             r_out,_ = model.step(x[:,:,t])
             if n_steps-t <= answer_step:
                 p = torch.softmax(r_out, dim=1)
-                error = (y-p)*beta[t]
+                error = sample_weight*(y-p)*beta[t] 
                 model.prop(error=error)
                 model.backwards()
                 avg_p = p + avg_p
@@ -318,17 +312,19 @@ def test(model, data_loader, answer_step, beta):
     return acc_p, loss
 
 
-def test_analy(model, data_loader, answer_step, beta, num_classes=35, eps=1e-12):
+def test_analy_confusion(model, data_loader, answer_step, beta, num_classes=None, eps=1e-12):
     model.eval()
-    num_sample = len(data_loader.dataset)
     device = model.device
+    num_sample = len(data_loader.dataset)
 
     loss, correct = 0., 0
 
-    # confusion stats
-    TP = torch.zeros(num_classes, device=device)
-    FP = torch.zeros(num_classes, device=device)
-    FN = torch.zeros(num_classes, device=device)
+    # infer class number
+    if num_classes is None:
+        num_classes = data_loader.dataset[0][1].shape[-1]
+
+    # initialize confusion matrix
+    confusion = torch.zeros(num_classes, num_classes, device=device, dtype=int)
 
     with torch.no_grad():
         for x_test, y_test in data_loader:
@@ -349,47 +345,60 @@ def test_analy(model, data_loader, answer_step, beta, num_classes=35, eps=1e-12)
 
             prediction = torch.argmax(pred_p, dim=1)
 
-            # ---- loss and accuracy ----
+            # ----- loss & accuracy -----
             loss += -(y_test * torch.log(pred_p + eps)).mean(dim=1).sum().item()
             correct += (prediction == y_true).sum().item()
 
-            # ---- per-class stats ----
-            for c in range(num_classes):
-                pred_is_c = (prediction == c)
-                true_is_c = (y_true == c)
+            # ----- confusion matrix accumulation -----
+            # flatten pairs (true, pred) into linear index
+            indices = y_true * num_classes + prediction
+            cm_batch = torch.bincount(
+                indices,
+                minlength=num_classes * num_classes
+            ).reshape(num_classes, num_classes)
 
-                TP[c] += (pred_is_c & true_is_c).sum()
-                FP[c] += (pred_is_c & ~true_is_c).sum()
-                FN[c] += (~pred_is_c & true_is_c).sum()
+            confusion += cm_batch
 
     loss /= num_sample
     acc_p = correct * 100 / num_sample
 
-    # ---- metrics ----
+    # ---- derive metrics from confusion matrix ----
+    TP = confusion.diag()
+    FN = confusion.sum(dim=1) - TP
+    FP = confusion.sum(dim=0) - TP
+    TN = confusion.sum() - (TP + FP + FN)
+
     recall = TP / (TP + FN + eps)
     precision = TP / (TP + FP + eps)
     f1 = 2 * precision * recall / (precision + recall + eps)
 
-    per_class = {
-        "TP": TP.cpu(),
-        "FP": FP.cpu(),
-        "FN": FN.cpu(),
-        "recall": recall.cpu(),
-        "precision": precision.cpu(),
-        "f1": f1.cpu(),
+    results = {
+        "confusion_matrix": confusion.cpu().numpy(),
+        "TP": TP.cpu().numpy(),
+        "FP": FP.cpu().numpy(),
+        "FN": FN.cpu().numpy(),
+        "TN": TN.cpu().numpy(),
+        "recall": recall.cpu().numpy(),
+        "precision": precision.cpu().numpy(),
+        "f1": f1.cpu().numpy(),
+        "macro_recall": recall.mean().item(),
+        "macro_f1": f1.mean().item(),
     }
 
-    return acc_p, loss, per_class
+    return acc_p, loss, results
+
 
 def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
     n_steps = x.shape[-1]
     model.reset()
+    class_weight = torch.ones(21).to(model.device)
+    class_weight[-1] = 0.6
     total_loss = 0.
     for t in range(n_steps):
         r_out,_ = model.step(x[:, :, t])
         if n_steps-t <= answer_step:
             p = torch.softmax(r_out, dim=1)
-            total_loss += -(y * torch.log(p)).mean(dim=1).sum()*beta[t]
+            total_loss += -(class_weight*y*torch.log(p)).mean(dim=1).sum()*beta[t]
     total_loss.backward()
     optimizer.step()
     optimizer.zero_grad()
@@ -403,26 +412,12 @@ def make_weighted_sampler(dataset, label_counts):
     label_counts   : dict {class_id: count}
     """
 
-    # inverse frequency per class
-    # class_weights = {
-    #     LABELS.index(cls): 1.0 / count
-    #     for cls, count in label_counts.items()
-    # }
-
-    # sample_weights = torch.tensor(
-    #     [class_weights[int(label)] for label in dataset.labels],
-    #     dtype=torch.double
-    # )
-
-    class_number = {
-        LABELS.index(cls): count
+    #inverse frequency per class
+    class_weights = {
+        LABELS.index(cls): 1.0 / count
         for cls, count in label_counts.items()
     }
 
-    class_number20 = torch.zeros(21)
-    for word in class_number.keys():
-        class_number20[INDEX20[word]] += class_number[word]
-    class_weights = 1.0/class_number20
     sample_weights = torch.tensor(
         [class_weights[int(label)] for label in dataset.labels],
         dtype=torch.double

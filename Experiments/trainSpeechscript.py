@@ -44,13 +44,13 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
-    parser.add_argument("--balanced", type=bool, default=True)
 
     ### Data config
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--mask", type=int, default=0)
     parser.add_argument("--mask_fre", type=int, default=4)
     parser.add_argument("--warp", type=int, default=12)
+    parser.add_argument("--weighted_sampler", dest="weighted_sampler", action="store_true")
     
     
     ### Model config
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 16, 36],)
     parser.add_argument("--Tau3", type=int, nargs="+", default=[20, 100., 320, 800],)
     
-    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
+    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, weighted_sampler=False)
     
     args = parser.parse_args()
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     train_config["num_workers"] = args.workers
     train_config["method"] = args.method
     train_config["update_interval"] = args.update_interval
-    train_config["balance_sampler"] = args.balanced
+    train_config["weighted_sampler"] = args.weighted_sampler
     
     # Dataset Config
     dt = general_config["dt"]
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     n_class = data_config["n_class"]
     n_steps = data_config["n_steps"]
     answer_steps = int(model_config["answer_period"]/dt)
-    rootdir = Path('..') / "SpeechCommands" / "Mel_npy"
+    rootdir = Path('..') / "SpeechCommands" / "Mel_80"
     
     train_set = ShardedMelDataset(rootdir / 'training')
     val_set = ShardedMelDataset(rootdir / 'validation')
@@ -146,7 +146,7 @@ if __name__ == "__main__":
         num_workers = 0
         pin_memory = False
 
-    if train_config["balance_sampler"]:
+    if train_config["weighted_sampler"]:
         with open(rootdir / "training"/ "label_stats.json") as f:
             label_counts = json.load(f)["label_counts"]
         sampler = make_weighted_sampler(train_set, label_counts)
