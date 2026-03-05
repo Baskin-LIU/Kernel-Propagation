@@ -100,9 +100,12 @@ def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
             r_out,_ = model.step(x[:, t])
             if n_steps-t <= answer_step:
                 p = torch.softmax(r_out, dim=1)
-                error = (one_hot_label - p)*beta[t]
-                model.prop(error=error)
-                model.backwards()
+                if beta[t] != 0:
+                    error = (one_hot_label - p)*beta[t]
+                    model.prop(error=error)
+                    model.backwards()
+                else:
+                    model.prop(learn=False)
                 avg_p = p + avg_p
             else:
                 model.prop(learn=False)

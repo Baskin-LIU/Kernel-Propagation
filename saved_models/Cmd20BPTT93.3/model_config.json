@@ -3,14 +3,15 @@
         360
     ],
     "LP_size": [
-        180,
         240,
         300,
-        320
+        300,
+        300,
+        360
     ],
     "Tau0": [
         2,
-        50,
+        40,
         6
     ],
     "Tau1": [
@@ -24,17 +25,19 @@
         36
     ],
     "Tau3": [
-        20,
-        100.0,
-        320,
-        800
+        5.0,
+        14.0
+    ],
+    "Tau4": [
+        200.0,
+        1000.0
     ],
     "activation": "tanh",
-    "answer_period": 640,
-    "n_in": 64,
-    "n_out": 21,
+    "answer_period": 500,
+    "n_in": 80,
+    "n_out": 20,
     "num_Ins_layers": 1,
-    "num_LP_layers": 4,
+    "num_LP_layers": 5,
     "reducedNonlinear": false,
     "rho_scale": 0.6
 }

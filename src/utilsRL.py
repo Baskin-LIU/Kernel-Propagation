@@ -1,4 +1,5 @@
 import gymnasium as gym
+from gymnasium.envs.classic_control.cartpole import CartPoleEnv
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -45,14 +46,74 @@ default_model_config = {
     'Tau2': np.array([11, 11, 11, 24, 24]),
 }
 
+
+
+class WindCartPoleEnv(CartPoleEnv):
+
+    def __init__(self, wind=0.0, render_mode=None):
+        super().__init__(render_mode=render_mode)
+        self.wind = wind
+
+    def step(self, action):
+
+        x, x_dot, theta, theta_dot = self.state
+
+        force = self.force_mag if action == 1 else -self.force_mag
+
+        # add wind disturbance
+        force += self.wind
+
+        costheta = np.cos(theta)
+        sintheta = np.sin(theta)
+
+        temp = (force + self.polemass_length * theta_dot**2 * sintheta) / self.total_mass
+
+        thetaacc = (self.gravity * sintheta - costheta * temp) / (
+            self.length * (4.0/3.0 - self.masspole * costheta**2 / self.total_mass)
+        )
+
+        xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
+
+        x = x + self.tau * x_dot
+        x_dot = x_dot + self.tau * xacc
+        theta = theta + self.tau * theta_dot
+        theta_dot = theta_dot + self.tau * thetaacc
+
+        self.state = (x, x_dot, theta, theta_dot)
+
+        terminated = (
+            x < -self.x_threshold
+            or x > self.x_threshold
+            or theta < -self.theta_threshold_radians
+            or theta > self.theta_threshold_radians
+        )
+
+        reward = 1.0
+
+        return np.array(self.state, dtype=np.float32), reward, terminated, False, {}
+
+
 class CartPoleCustomize(gym.Wrapper):
-    def __init__(self, display=False):
+    def __init__(self, env=None, display=False):
         # step size 20 ms
-        if display:
-            env = gym.make("CartPole-v1", render_mode="rgb_array")
-        else:
-            env = gym.make("CartPole-v1")
+        if env is None:
+            if display:
+                env = gym.make("CartPole-v1", render_mode="rgb_array")
+            else:
+                env = gym.make("CartPole-v1")
         super().__init__(env)
+
+        env = self.env.unwrapped
+        # Angle at which to fail the episode
+        self.angle_threshold = 18 #12
+        self.x_threshold = 3.6 #2.4
+        env.theta_threshold_radians = self.angle_threshold * 2 * np.pi / 360
+        env.x_threshold = self.x_threshold
+        
+        self.angle_punish_threshold = 6*2*np.pi/360
+        self.x_punish_threshold = 1.5
+        
+        
         self.obs_mask = [1, 3]
 
     def reset(self, **kwargs):
@@ -62,7 +123,7 @@ class CartPoleCustomize(gym.Wrapper):
 
     def step(self, action):
         obs, reward, done, truncated, info = self.env.step(action)
-        reward = reward - np.abs(obs[2]).sum() - 0.08*np.abs(obs[0]).sum()
+        reward = reward - 5*np.maximum(0, np.abs(obs[2]) - self.angle_punish_threshold) - np.maximum(0, np.abs(obs[0]) - self.x_punish_threshold)
         obs = torch.tensor(obs[self.obs_mask])[None, :]
 
         return obs, reward, done, truncated, info
@@ -72,6 +133,10 @@ class CartPoleCustomize(gym.Wrapper):
         env.masspole = m
         env.total_mass = env.masspole + env.masscart
         env.polemass_length = env.masspole * env.length
+
+    def set_wind(self, wind):
+        env = self.env.unwrapped
+        env.wind = wind
 
 
 

@@ -197,11 +197,15 @@ class FwdGLENeurons(FwdNeurons):
         if self.previous_layer != None:
             self.previous_layer[0].wTe = self.mismatch @ self.W_in
         return 0, 0
-        
+
     def learnW(self, update=True):
-        dW_in = (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
-        self.W_in += dW_in * self.lr_w
-        self.bias += self.mismatch.mean(0) * self.lr_b
+        self.dW_in += (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
+        self.dbias += self.mismatch.mean(0)
+        if update:
+            self.W_in += self.dW_in * self.lr_w
+            self.bias += self.dbias * self.lr_b
+            self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
+            self.dbias = torch.zeros(self.n_neurons).to(self.device)
 
     def backwards(self, ):
         self.W_in.grad -= (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
@@ -226,13 +230,16 @@ class FwdRFNeurons(FwdNeurons):
     
     def prop(self, **kwargs):
         super().prop()
-        self.r_bar = self.decay[None, :, None] * self.r_bar + self.dt_tau[None, :, None] * self.r_in[:, None, :]
         return 0, 0
-        
+
     def learnW(self, update=True):
-        dW_in = (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
-        self.W_in += dW_in * self.lr_w
-        self.bias += self.epsilon.mean(0) * self.lr_b
+        self.dW_in += (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+        self.dbias += self.epsilon.mean(0)
+        if update:
+            self.W_in += self.dW_in * self.lr_w
+            self.bias += self.dbias * self.lr_b
+            self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
+            self.dbias = torch.zeros(self.n_neurons).to(self.device)
 
     def backwards(self, ):
         self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)

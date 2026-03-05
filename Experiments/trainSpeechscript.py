@@ -40,16 +40,20 @@ if __name__ == "__main__":
     ### Training config
     parser.add_argument("--lr", type=float, default=2e-3)
     parser.add_argument("--num_epochs", type=int, default=60)
-    parser.add_argument("--answer_t", type=int, default=640)
+    parser.add_argument("--answer_t", type=int, default=600)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
+    parser.add_argument("--error_steps", type=int, default=20)
+    parser.add_argument("--cont_train", dest="cont_train", action="store_true")
 
     ### Data config
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--mask", type=int, default=0)
     parser.add_argument("--mask_fre", type=int, default=4)
-    parser.add_argument("--warp", type=int, default=12)
+    parser.add_argument("--max_warp", type=int, default=25)
+    parser.add_argument("--max_shift", type=int, default=25)
+    parser.add_argument("--mel", type=int, default=80)
     parser.add_argument("--weighted_sampler", dest="weighted_sampler", action="store_true")
     
     
@@ -58,14 +62,16 @@ if __name__ == "__main__":
     parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[180, 240, 300, 320],)
+        help="Hidden Low-pass layer sizes", default=[240, 300, 300, 360],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 50, 6],)
-    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 12, 24],)
-    parser.add_argument("--Tau2", type=int, nargs="+", default=[4, 16, 36],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[20, 100., 320, 800],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 40, 6],)
+    parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 12, 24],)
+    parser.add_argument("--Tau2", type=float, nargs="+", default=[4, 16, 36],)
+    parser.add_argument("--Tau4", type=float, nargs="+", default=[5, 14, 30],)
+    parser.add_argument("--Tau5", type=float, nargs="+", default=[5, 14, 30],)
+    parser.add_argument("--TauL", type=float, nargs="+", default=[50, 400],) #Last LP layer
     
-    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, weighted_sampler=False)
+    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, weighted_sampler=False, cont_train=False)
     
     args = parser.parse_args()
 
@@ -105,8 +111,9 @@ if __name__ == "__main__":
     model_config["activation"] = args.activation
     model_config["answer_period"] = args.answer_t
     
-    for i in range(model_config["num_LP_layers"]):
+    for i in range(model_config["num_LP_layers"]-1):
         model_config["Tau%d"%i] =getattr(args, "Tau%d"%i)
+    model_config["Tau%d"%(i+1)] =getattr(args, "TauL")
 
     # Training Config
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
@@ -116,6 +123,7 @@ if __name__ == "__main__":
     train_config["method"] = args.method
     train_config["update_interval"] = args.update_interval
     train_config["weighted_sampler"] = args.weighted_sampler
+    train_config["error_steps"] = args.error_steps
     
     # Dataset Config
     dt = general_config["dt"]
@@ -125,19 +133,28 @@ if __name__ == "__main__":
     # Create training and testing split of the data. We do not use validation in this tutorial.
     data_config["mask_width"] = args.mask
     data_config["mask_width_fre"] = args.mask_fre
-    data_config["warp"] = args.warp
+    data_config["max_warp"] = args.max_warp
+    data_config["max_shift"] = args.max_shift
     data_config["n_steps"] = int(data_config["duration"]/dt)
+    
     data_config["n_class"] = len(COMMAND20)
     n_class = data_config["n_class"]
     n_steps = data_config["n_steps"]
     answer_steps = int(model_config["answer_period"]/dt)
-    rootdir = Path('..') / "SpeechCommands" / "Mel_80"
+    if args.mel == 80:
+        rootdir = Path('..') / "SpeechCommands" / "Mel_80"
+    elif args.mel == 64:
+        rootdir = Path('..') / "SpeechCommands" / "Mel_npy"
+    else:
+        rootdir = Path('..') / "SpeechCommands" / "Mel"
     
     train_set = ShardedMelDataset(rootdir / 'training')
     val_set = ShardedMelDataset(rootdir / 'validation')
     
     mel_sample, label = val_set[0]
     data_config['n_mels'] = mel_sample.shape[0]
+    ori_len = mel_sample.shape[1]
+    data_config['hop_length'] = (16000/ori_len)
     
     if device == "cuda":
         num_workers = train_config['num_workers']
@@ -160,10 +177,13 @@ if __name__ == "__main__":
         batch_size=train_config['batch_size'],
         shuffle=shuffle,
         sampler=sampler,
-        collate_fn=CollateMel(n_steps, n_class, training=True, 
+        collate_fn=CollateMel(n_steps, n_class, training=True,
+                              ori_len = ori_len, 
                               mask_width=data_config["mask_width"], 
                               mask_width_fre=data_config["mask_width_fre"],
-                              max_warp = data_config["warp"],),
+                              max_warp = data_config["max_warp"],
+                              max_shift = data_config["max_shift"],
+                              ),
         num_workers=num_workers,
         pin_memory=True,
     )
@@ -195,7 +215,7 @@ if __name__ == "__main__":
         if args.update_interval==-1:
             train_fn = train_batch_delay
         else:
-            train_fn = train_batch_periodic(args.update_interval)
+            train_fn = train_batch_periodic(args.update_interval) #Not Implemented Yet
         if args.method=='KP':
             model = buildKPNet(model_config, general_config).to(device)
         elif args.method=='GLE':
@@ -212,12 +232,19 @@ if __name__ == "__main__":
         betas=(0.9, 0.999)
     )
     
+    train_config["factor"] = 0.5 if args.method=='BPTT' else 0.8
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
-        factor=0.5,
-        patience=1
+        factor=train_config["factor"],
+        patience=2
     )
+
+    if args.cont_train: #load midway model
+        ckp = torch.load(Path("..") / "midway_models" / args.group_name+f"{args.seed}.pt")
+        model.load_state_dict(ckp['model'])
+        optimizer.load_state_dict(ckp['optimizer'])
+        scheduler.load_state_dict(ckp['scheduler'])
     
     beta = torch.zeros(n_steps).to(model.device)
     beta[-answer_steps:]=1.
@@ -275,8 +302,15 @@ if __name__ == "__main__":
             disable=not general_config["verbose"],
         )
         for batch_idx, (x, target) in pbar:
+            if args.error_steps==-1: #All steps in answering period
+                beta_temp = beta
+            else: #Random selected steps in answering period
+                beta_temp = torch.zeros(n_steps).to(device)
+                select_steps = np.random.choice(answer_steps, args.error_steps, replace=False)
+                beta_temp[select_steps+n_steps-answer_steps] = 1.
+                beta_temp /= beta_temp.sum()
             total_loss = train_fn(model, optimizer, x.to(device),
-                                        target.to(device), answer_steps, beta)
+                                        target.to(device), answer_steps, beta_temp)
             Cum_loss += total_loss
         Cum_loss /= len(train_loader.dataset)
 
@@ -286,6 +320,15 @@ if __name__ == "__main__":
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_model_state_dict = model.state_dict().copy()
+        
+        if args.method=='KP':
+            checkpoint = { 
+                'epoch': epoch,
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict()
+                }
+            torch.save(checkpoint, Path("..") / "midway_models" / args.group_name+f"{args.seed}.pt")
 
         print(
             f"Epoch: {epoch+1}, "

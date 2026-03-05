@@ -115,11 +115,12 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
         tau.append(np.repeat(tau_uniq[:, None],
                                           LP_size[i+1]//tau_uniq.shape[0]))
     layers = torch.nn.ModuleList()
-
+    learn_depth = 0
     if neurontype=='GLE':
         layer_fn = FwdGLENeurons  
     elif neurontype=='RFLO':
         layer_fn = FwdRFNeurons
+        learn_depth = model_config['num_LP_layers']-1
     elif neurontype=='BPTT':
         layer_fn = FwdNeurons
     else:
@@ -174,7 +175,7 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
             )
     )
     
-    return FwdNetwork(layers=layers, dt=dt, device=device)
+    return FwdNetwork(layers=layers, learn_depth=learn_depth, dt=dt, device=device)
 
 
 class Recorder():

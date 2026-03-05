@@ -72,10 +72,7 @@ class FwdDENeurons(FwdNeurons):
         self.bias.grad -= (K * self.elig_b).sum(axis=1).mean(dim=0)
 
     def reset(self,):
-        # super().reset()
-        # self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
         super().reset_uniq()
-        #super().reset_bar()
         self.elig = torch.zeros(1,self.downstream,self.n_neurons,self.n_in).to(self.device)
         self.elig_b = torch.zeros(1, self.downstream, self.n_neurons).to(self.device)
 

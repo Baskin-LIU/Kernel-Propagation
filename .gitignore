@@ -19,3 +19,6 @@ wandb
 
 #data
 SpeechCommands/
+
+./Figures
+./midway_models
