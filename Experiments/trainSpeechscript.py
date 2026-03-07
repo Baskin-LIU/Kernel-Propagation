@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("--cont_train", dest="cont_train", action="store_true")
 
     ### Data config
+    parser.add_argument("--task", type=str, default="Cmd20")
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--mask", type=int, default=0)
     parser.add_argument("--mask_fre", type=int, default=4)
@@ -55,7 +56,6 @@ if __name__ == "__main__":
     parser.add_argument("--max_shift", type=int, default=25)
     parser.add_argument("--mel", type=int, default=80)
     parser.add_argument("--weighted_sampler", dest="weighted_sampler", action="store_true")
-    
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
@@ -67,8 +67,8 @@ if __name__ == "__main__":
     parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 40, 6],)
     parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 12, 24],)
     parser.add_argument("--Tau2", type=float, nargs="+", default=[4, 16, 36],)
-    parser.add_argument("--Tau4", type=float, nargs="+", default=[5, 14, 30],)
-    parser.add_argument("--Tau5", type=float, nargs="+", default=[5, 14, 30],)
+    parser.add_argument("--Tau3", type=float, nargs="+", default=[5, 14],)
+    parser.add_argument("--Tau4", type=float, nargs="+", default=[6, 15],)
     parser.add_argument("--TauL", type=float, nargs="+", default=[50, 400],) #Last LP layer
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, weighted_sampler=False, cont_train=False)
@@ -136,8 +136,16 @@ if __name__ == "__main__":
     data_config["max_warp"] = args.max_warp
     data_config["max_shift"] = args.max_shift
     data_config["n_steps"] = int(data_config["duration"]/dt)
+    data_config["task"] = args.task
     
-    data_config["n_class"] = len(COMMAND20)
+    if data_config["task"]=="Cmd20":
+        data_config["n_class"] = len(COMMAND20)
+    elif data_config["task"]=="Full":
+        data_config["n_class"] = len(LABELS)
+    elif data_config["task"]=="WD1600":
+        data_config["n_class"] = len(WORDS1600)
+    else:
+        raise NotImplementedError
     n_class = data_config["n_class"]
     n_steps = data_config["n_steps"]
     answer_steps = int(model_config["answer_period"]/dt)
@@ -148,8 +156,8 @@ if __name__ == "__main__":
     else:
         rootdir = Path('..') / "SpeechCommands" / "Mel"
     
-    train_set = ShardedMelDataset(rootdir / 'training')
-    val_set = ShardedMelDataset(rootdir / 'validation')
+    train_set = ShardedMelDataset(rootdir / 'training', task=data_config["task"])
+    val_set = ShardedMelDataset(rootdir / 'validation', task=data_config["task"])
     
     mel_sample, label = val_set[0]
     data_config['n_mels'] = mel_sample.shape[0]
@@ -232,7 +240,7 @@ if __name__ == "__main__":
         betas=(0.9, 0.999)
     )
     
-    train_config["factor"] = 0.5 if args.method=='BPTT' else 0.8
+    train_config["factor"] = 0.5 if args.method=='BPTT' else 0.6
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
@@ -241,7 +249,7 @@ if __name__ == "__main__":
     )
 
     if args.cont_train: #load midway model
-        ckp = torch.load(Path("..") / "midway_models" / args.group_name+f"{args.seed}.pt")
+        ckp = torch.load(Path("..") / "midway_models" / (args.group_name+f"{args.seed}.pt"))
         model.load_state_dict(ckp['model'])
         optimizer.load_state_dict(ckp['optimizer'])
         scheduler.load_state_dict(ckp['scheduler'])
@@ -263,7 +271,7 @@ if __name__ == "__main__":
     # wandb config
     api_key_file = Path("~/.wandbAPIkey.txt").expanduser().resolve()
     project_name = "KPSpeech"
-    group_name = args.group_name + args.method
+    group_name = args.task + args.method + args.group_name
 
     # login to wandb
     with open(api_key_file, "r") as file:
@@ -328,7 +336,7 @@ if __name__ == "__main__":
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
                 }
-            torch.save(checkpoint, Path("..") / "midway_models" / args.group_name+f"{args.seed}.pt")
+            torch.save(checkpoint, Path("..") / "midway_models" / (args.group_name+f"{args.seed}.pt"))
 
         print(
             f"Epoch: {epoch+1}, "
@@ -357,7 +365,7 @@ if __name__ == "__main__":
     gc.collect()
 
     print("Evaluation on best model...")
-    test_set = ShardedMelDataset(rootdir / 'testing')
+    test_set = ShardedMelDataset(rootdir / 'testing', task=data_config["task"])
     test_loader = torch.utils.data.DataLoader(
         test_set,
         batch_size=512,

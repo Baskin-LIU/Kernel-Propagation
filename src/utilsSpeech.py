@@ -95,7 +95,9 @@ class ShardedMelDataset(torch.utils.data.Dataset):
 
     def __init__(self, split_dir, task='Cmd20'):
         if task == 'Cmd20':
-            self.indexInFull = {LABELS.index(w): i for i, w in enumerate(COMMAND20)} 
+            self.indexInFull = {LABELS.index(w): i for i, w in enumerate(COMMAND20)}
+        elif task == 'WD1600':
+            self.indexInFull = {LABELS.index(w): i for i, w in enumerate(WORDS1600)}
         split_dir = Path(split_dir)
 
         with open(split_dir / "shard_index.json") as f:
@@ -108,27 +110,29 @@ class ShardedMelDataset(torch.utils.data.Dataset):
         self.label_paths = []
         self.keep_indices = []   # local indices per shard
         self.sizes = []
+        all_labels = []
 
         for s in self.shard_info:
             label_path = self.split_dir / s["label_file"]
             labels = np.load(label_path)
 
-            if task == 'Cmd20':
+            if task != 'Full':
                 mask = np.isin(labels, list(self.indexInFull.keys()))
                 keep_idx = np.where(mask)[0]
-
                 if len(keep_idx) == 0:
                     continue
-
                 self.keep_indices.append(keep_idx)
                 self.sizes.append(len(keep_idx))
+                all_labels.append(np.array([self.indexInFull[lb] for lb in labels[keep_idx]]))
             else:
                 self.keep_indices.append(None)
                 self.sizes.append(len(labels))
+                all_labels.append(labels)
 
             self.mel_paths.append(self.split_dir / s["mel_file"])
             self.label_paths.append(label_path)
 
+        self.labels = np.concatenate(all_labels, dtype=np.int16)
         self.cum_sizes = np.cumsum(self.sizes)
 
         self._mels = None
@@ -153,7 +157,7 @@ class ShardedMelDataset(torch.utils.data.Dataset):
         prev = 0 if shard_id == 0 else self.cum_sizes[shard_id - 1]
         local_idx = idx - prev
 
-        if self.task == 'Cmd20':
+        if self.task != 'Full':
             true_idx = self.keep_indices[shard_id][local_idx]
         else:
             true_idx = local_idx
@@ -161,10 +165,11 @@ class ShardedMelDataset(torch.utils.data.Dataset):
         x = torch.tensor(self._mels[shard_id][true_idx])
         y = self._labels[shard_id][true_idx]
 
-        if self.task == 'Cmd20':
-            y = torch.tensor(self.indexInFull[int(y)])
-        else:
-            y = torch.tensor(y)
+        # if self.task != 'Full':
+        #     y = torch.tensor(self.indexInFull[int(y)])
+        # else:
+        #     y = torch.tensor(y)
+        y = torch.tensor(y)
 
         return x, y
         
@@ -457,22 +462,27 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
     return total_loss.detach()
 
 
-def make_weighted_sampler(dataset, label_counts):
+def make_weighted_sampler(dataset, num_classes):
     """
     dataset.labels : list or 1D tensor of class indices
     label_counts   : dict {class_id: count}
     """
 
-    #inverse frequency per class
-    class_weights = {
-        LABELS.index(cls): 1.0 / count
-        for cls, count in label_counts.items()
-    }
+    class_counts = np.bincount(dataset.labels, minlength=num_classes)
 
-    sample_weights = torch.tensor(
-        [class_weights[int(label)] for label in dataset.labels],
-        dtype=torch.double
-    )
+    class_weights = 1.0 / class_counts
+    sample_weights = class_weights[dataset.labels]
+
+    # #inverse frequency per class
+    # class_weights = {
+    #     LABELS.index(cls): 1.0 / count
+    #     for cls, count in label_counts.items()
+    # }
+
+    # sample_weights = torch.tensor(
+    #     [class_weights[int(label)] for label in dataset.labels],
+    #     dtype=torch.double
+    # )
 
     sampler = torch.utils.data.WeightedRandomSampler(
         weights=sample_weights,
