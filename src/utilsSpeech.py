@@ -163,13 +163,12 @@ class ShardedMelDataset(torch.utils.data.Dataset):
             true_idx = local_idx
 
         x = torch.tensor(self._mels[shard_id][true_idx])
-        y = self._labels[shard_id][true_idx]
-
+        #y = self._labels[shard_id][true_idx]
         # if self.task != 'Full':
         #     y = torch.tensor(self.indexInFull[int(y)])
         # else:
         #     y = torch.tensor(y)
-        y = torch.tensor(y)
+        y = torch.tensor(self.labels[idx])
 
         return x, y
         

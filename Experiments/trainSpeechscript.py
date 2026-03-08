@@ -174,7 +174,7 @@ if __name__ == "__main__":
     if train_config["weighted_sampler"]:
         with open(rootdir / "training"/ "label_stats.json") as f:
             label_counts = json.load(f)["label_counts"]
-        sampler = make_weighted_sampler(train_set, label_counts)
+        sampler = make_weighted_sampler(train_set, data_config["n_class"])
         shuffle = False
     else:
         sampler = None
@@ -212,14 +212,16 @@ if __name__ == "__main__":
     model_config['n_in'] = data_config['n_mels']
     
     beta = torch.zeros(n_steps).to(device)
-    beta[-answer_steps:]=1.
+    beta[-answer_steps:] = 1.
     beta /= beta.sum()
 
     # Init network and optimizer
     if args.method=='BPTT':
         model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         train_fn = train_batch_BPTT
+        adam_betas = (0.9, 0.999)
     else:
+        adam_betas = (0.92, 0.999)
         if args.update_interval==-1:
             train_fn = train_batch_delay
         else:
@@ -232,12 +234,13 @@ if __name__ == "__main__":
             model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError
-
+    
     model = torch.compile(model)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=train_config["learning_rate"],
-        betas=(0.9, 0.999)
+        betas=adam_betas,
+        weight_decay=1e-3,
     )
     
     train_config["factor"] = 0.5 if args.method=='BPTT' else 0.6

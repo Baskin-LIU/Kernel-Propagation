@@ -20,7 +20,7 @@ class FwdNetwork(torch.nn.Module):
                 self.layers.append(layers(n_in=l.n_in, n_neurons=l.n_neurons, tau=l.tau, lr_w=l.lr_w, bias=l.bias.detach().clone(),
                       W_in=l.W_in.detach().clone(), activation=l.activation, dt=l.dt, scale=l.scale))
             
-            l=net.layers[-1]
+            l = net.layers[-1]
             self.layers.append(FwdNeurons(n_in=l.n_in, n_neurons=l.n_neurons, tau=l.tau, lr_w=l.lr_w, bias=l.bias.detach().clone(),
                       W_in=l.W_in.detach().clone(), activation=l.activation, dt=l.dt))
                 
@@ -36,6 +36,8 @@ class FwdNetwork(torch.nn.Module):
         r = r_in
         for i, l in enumerate(self.layers):
             r, u = l.step(r_in=r, noise=noise)
+            if i == (self.learn_depth-1):
+                r = r.detach()
 
         return r, u
 
