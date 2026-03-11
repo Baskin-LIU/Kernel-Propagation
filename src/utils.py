@@ -100,10 +100,10 @@ def buildKPNet(model_config, general_config):
     )
 
     if 'skip_connection' in model_config and model_config['skip_connection']:
-        net = DESkipNetwork(layers=layers, device=device)
+        net = DESkipNetwork(layers=layers, device=device, dt=dt)
         print("skip connection activated")
     else:
-        net = DEFwdNetwork(layers=layers, device=device)
+        net = DEFwdNetwork(layers=layers, device=device, dt=dt)
     return net
 
 def buildNetCompare(model_config, general_config, neurontype='GLE'):
@@ -179,9 +179,14 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
             device=device,
             )
     )
-    
-    return FwdNetwork(layers=layers, learn_depth=learn_depth, dt=dt, device=device)
 
+    if 'skip_connection' in model_config and model_config['skip_connection']:
+        net = SkipNetwork(layers=layers, learn_depth=learn_depth, dt=dt, device=device)
+        print("skip connection activated")
+    else:
+        net = FwdNetwork(layers=layers, learn_depth=learn_depth, dt=dt, device=device)
+    return net
+    
 
 class Recorder():
 

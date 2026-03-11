@@ -226,50 +226,6 @@ def buildRLNet(model_config, general_config):
     return DEFwdNetwork(layers=layers, dt=dt, device=device)
 
 
-def episode(env, actor, critic, critic_target, optimizer_actor, optimizer_critic):
-    # Run one episode
-    observation, _ = env.reset()
-    actor.reset()
-    critic.reset()
-    critic_target.reset()
-
-    terminated, truncated = False, False
-    total_reward=0
-    gamma=0.9
-
-    with torch.no_grad():
-        while not terminated and not truncated:
-            # Render the environment
-            #env.render()
-            # Take a random action
-            u, _ = actor.step(observation)
-            p = torch.softmax(u, dim=1)
-            action = np.random.choice(n_actions, p=p[0].cpu().numpy())
-            value,_ = critic.step(observation)
-            # Step the environment
-            observation_next, reward, terminated, truncated,_ = env.step(action)
-            value_next,_ = critic_target.step(observation)
-
-            delta = reward + gamma*value_next - value
-
-            optimizer_actor.zero_grad(set_to_none=False)
-            optimizer_critic.zero_grad(set_to_none=False)
-            
-            actor.prop(F.one_hot(torch.tensor(action), num_classes=n_actions)-p)
-            actor.backwardsRL(delta.item(), gamma)
-            critic.prop(1.)
-            critic.backwardsRL(delta.item(), gamma)
-
-            optimizer_actor.step()
-            optimizer_critic.step()
-
-            total_reward+=reward
-
-        hard_update(critic_target, critic)
-        #soft_update(critic_target, critic, tau=0.01)
-
-    return total_reward
-
 @torch.no_grad()
 def soft_update(target, source, tau = 0.01):
     for p_t, p in zip(target.parameters(), source.parameters()):

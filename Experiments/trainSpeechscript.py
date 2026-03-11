@@ -217,7 +217,7 @@ if __name__ == "__main__":
         train_fn = train_batch_BPTT
         adam_betas = (0.9, 0.999)
     else:
-        adam_betas = (0.91, 0.999)
+        adam_betas = (0.9, 0.999)
         if args.update_interval==-1:
             train_fn = train_batch_delay
         else:
