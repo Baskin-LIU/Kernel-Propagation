@@ -93,6 +93,7 @@ class DEFwdNetwork(FwdNetwork):
         totaln = 0
         for l in reversed(self.layers):
             l.downstream = totaln
+            l.register_buffer("downstream_mask", torch.arange(totaln, dtype=torch.int32))
             if l.LP:
                 tau_unique, inv, repeat_tau = torch.unique(l.tau, sorted=False, return_inverse=True, return_counts=True)
                 l.register_buffer("tau_unique", tau_unique)
@@ -133,7 +134,48 @@ class DEFwdNetwork(FwdNetwork):
             else:
                 break 
 
+class DESkipNetwork(DEFwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
+        l1_ntau = self.layers[1].tau_unique.shape[0]
+        self.layers[0].downstream = self.layers[3].downstream + l1_ntau
+        self.layers[0].downstream_mask = torch.cat((self.layers[3].downstream_mask, 
+                                                       torch.arange(l1_ntau)+self.layers[1].downstream))
+        self.layers[0].TauDE = torch.cat((self.layers[3].TauDE, self.layers[1].tau_unique))
+        self.layers[0].dt_tau_de = self.dt/self.layers[0].TauDE
+        self.layers[0].decay_de = 1-self.layers[0].dt_tau_de
+        
+        self.layers[1].downstream = self.layers[3].downstream
+        self.layers[1].downstream_mask = self.layers[3].downstream_mask
+        self.layers[1].TauDE = self.layers[3].TauDE
+        self.layers[1].dt_tau_de = self.layers[3].TauDE
+        self.layers[1].decay_de = self.layers[3].decay_de
 
+        self.layers[2].rho.scale = 1.
+        self.skip_weight = 0.2
+
+    def prop(self, error=0., learn=True):      
+        self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[6].prop(learn=learn)
+        self.layers[5].prop(learn=learn)
+        self.layers[4].prop(learn=learn)
+        self.layers[3].prop(learn=learn)
+        self.layers[2].prop(learn=False)
+        if learn:
+            self.layers[1].K = self.layers[3].K * self.skip_weight
+        self.layers[1].prop(learn=learn)
+        self.layers[0].prop(learn=False)
+
+    def step(self, r_in, noise=0):
+        r0,_ = self.layers[0].step(r_in=r_in)
+        r1,_ = self.layers[1].step(r_in=r0)
+        r2,_ = self.layers[2].step(r_in=r1.detach())
+        r3,_ = self.layers[3].step(r_in=r2)
+        r4,_ = self.layers[4].step(r_in=r1*self.skip_weight+r3)
+        r5,_ = self.layers[5].step(r_in=r4) #ins
+        r,u  = self.layers[6].step(r_in=r5)
+
+        return r, u
 
 
 class RTRLNetwork(FwdNetwork):
@@ -185,8 +227,39 @@ class RTRLNetwork(FwdNetwork):
 
 
 
+class SkipNetwork(FwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
+        self.layers[2].rho.scale = 1.
+        self.skip_weight = 0.2
+
+    def prop(self, error=0., learn=True):      
+        self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[5].prop(learn=learn)
+        self.layers[4].prop(learn=learn)
+        if self.learn_depth==4:
+            return
+        self.layers[3].prop(learn=learn)
+        self.layers[2].prop(learn=False)
+        if learn:
+            self.layers[1].epsilon = self.layers[3].epsilon * self.skip_weight
+        self.layers[1].prop(learn=learn)
+        self.layers[0].prop(learn=False)
+
+    def step(self, r_in, noise=0):
+        r0,_ = self.layers[0].step(r_in=r_in)
+        r1,_ = self.layers[1].step(r_in=r0)
+        r2,_ = self.layers[2].step(r_in=r1.detach())
+        r3,_ = self.layers[3].step(r_in=r2)
+        r4,_ = self.layers[4].step(r_in=r1*self.skip_weight+r3)
+        r5,_ = self.layers[5].step(r_in=r4) #ins
+        r,u  = self.layers[6].step(r_in=r5)
+
+        return r, u
 
 
+
+            
 
 
 

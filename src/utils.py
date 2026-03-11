@@ -98,8 +98,13 @@ def buildKPNet(model_config, general_config):
             device=device,
             )
     )
-    
-    return DEFwdNetwork(layers=layers, device=device)
+
+    if 'skip_connection' in model_config and model_config['skip_connection']:
+        net = DESkipNetwork(layers=layers, device=device)
+        print("skip connection activated")
+    else:
+        net = DEFwdNetwork(layers=layers, device=device)
+    return net
 
 def buildNetCompare(model_config, general_config, neurontype='GLE'):
     device = general_config["device"]

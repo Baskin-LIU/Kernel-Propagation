@@ -94,7 +94,7 @@ class WindCartPoleEnv(CartPoleEnv):
 
 
 class CartPoleCustomize(gym.Wrapper):
-    def __init__(self, env=None, display=False):
+    def __init__(self, env=None, display=False, obs='velocity'):
         # step size 20 ms
         if env is None:
             if display:
@@ -112,9 +112,13 @@ class CartPoleCustomize(gym.Wrapper):
         
         self.angle_punish_threshold = 6*2*np.pi/360
         self.x_punish_threshold = 1.5
-        
-        
-        self.obs_mask = [1, 3]
+
+        if obs == 'velocity':
+            self.obs_mask = [1, 3]
+        elif obs == 'position':
+            self.obs_mask = [0, 2]
+        else:
+            self.obs_mask = [0, 1, 2, 3]
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)

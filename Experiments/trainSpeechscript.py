@@ -210,10 +210,6 @@ if __name__ == "__main__":
     
     model_config['n_out'] = data_config['n_class']
     model_config['n_in'] = data_config['n_mels']
-    
-    beta = torch.zeros(n_steps).to(device)
-    beta[-answer_steps:] = 1.
-    beta /= beta.sum()
 
     # Init network and optimizer
     if args.method=='BPTT':
@@ -221,7 +217,7 @@ if __name__ == "__main__":
         train_fn = train_batch_BPTT
         adam_betas = (0.9, 0.999)
     else:
-        adam_betas = (0.92, 0.999)
+        adam_betas = (0.91, 0.999)
         if args.update_interval==-1:
             train_fn = train_batch_delay
         else:
@@ -240,7 +236,6 @@ if __name__ == "__main__":
         model.parameters(),
         lr=train_config["learning_rate"],
         betas=adam_betas,
-        weight_decay=1e-3,
     )
     
     train_config["factor"] = 0.5 if args.method=='BPTT' else 0.6
@@ -258,7 +253,7 @@ if __name__ == "__main__":
         scheduler.load_state_dict(ckp['scheduler'])
     
     beta = torch.zeros(n_steps).to(model.device)
-    beta[-answer_steps:]=1.
+    beta[-answer_steps:] = 1.
     beta /= beta.sum()
     
     best_val_acc = 0.

@@ -31,8 +31,6 @@ class LastFwdDENeurons(FwdNeurons):
 
     def reset(self,):
         super().reset_uniq()
-        #super().reset_bar()
-        #self.r_bar = torch.zeros(1, self.n_neurons, self.n_in).to(self.device)
         
 
 
@@ -57,7 +55,8 @@ class FwdDENeurons(FwdNeurons):
         return 0, 0
     
     def learnW(self, update=True):
-        K = self.K[:,:self.downstream].clone()
+        #K = self.K[:,:self.downstream].clone()
+        K = self.K[:,self.downstream_mask].clone()
         self.dW_in += (K.unsqueeze(-1)*self.elig).sum(1).mean(0)
         self.dbias += (K * self.elig_b).sum(1).mean(0)
         if update:
@@ -67,7 +66,7 @@ class FwdDENeurons(FwdNeurons):
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
 
     def backwards(self, ):
-        K = self.K[:,:self.downstream].clone()
+        K = self.K[:,self.downstream_mask].clone()
         self.W_in.grad -= (K.unsqueeze(-1)*self.elig).sum(axis=1).mean(dim=0)
         self.bias.grad -= (K * self.elig_b).sum(axis=1).mean(dim=0)
 

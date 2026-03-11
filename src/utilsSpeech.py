@@ -75,19 +75,22 @@ default_train_config = {
     }
 
 default_model_config = {
-    'n_in': 48, 
-    'n_out': 35, 
-    'num_LP_layers': 3, 
+    'n_in': 80, 
+    'n_out': 20, 
+    'num_LP_layers': 5, 
     'num_Ins_layers': 1,
     'rho_scale': 0.6,
-    'LP_size': [90, 120, 150], 
+    'LP_size': [90, 120, 120, 120, 150], 
     'Ins_size': [150, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
     'Tau0': [default_general_config['dt'], 50, 6], 
     'Tau1': [3, 12, 24], 
     'Tau2': [4, 16, 48],
-    "answer_period": 800,
+    'Tau3': [5, 20],
+    'Tau4': [100, 400],
+    "answer_period": 600,
+    "skip_connection": True,
     }
 
 
@@ -460,7 +463,6 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
             
     return total_loss.detach()
 
-
 def make_weighted_sampler(dataset, num_classes):
     """
     dataset.labels : list or 1D tensor of class indices
@@ -517,61 +519,3 @@ class SubsetSC(SPEECHCOMMANDS):
             excludes = load_list("validation_list.txt") + load_list("testing_list.txt")
             excludes = set(excludes)
             self._walker = [w for w in self._walker if w not in excludes]
-
-
-# class ShardedMelDatasetUnknown(torch.utils.data.Dataset):
-
-#     def __init__(self, split_dir, task='Cmd20'):
-#         split_dir = Path(split_dir)
-
-#         with open(split_dir / "shard_index.json") as f:
-#             self.shard_info = json.load(f)
-
-#         self.split_dir = split_dir
-#         self.task = task
-
-#         labels = []
-#         for s in self.shard_info:
-#             shard_labels = np.load(self.split_dir / s["label_file"])
-#             labels.append(shard_labels)
-    
-#         self.labels = np.concatenate(labels, dtype=np.int16)
-
-#         # store only paths (pickle-safe)
-#         self.mel_paths = [split_dir / s["mel_file"] for s in self.shard_info]
-#         self.label_paths = [split_dir / s["label_file"] for s in self.shard_info]
-#         self.sizes = [s["num_samples"] for s in self.shard_info]
-
-#         # cumulative index map
-#         self.cum_sizes = np.cumsum(self.sizes)
-
-#         # memmaps will be opened lazily per worker
-#         self._mels = None
-#         self._labels = None
-
-#     def _lazy_init(self):
-#         if self._mels is None:
-#             self._mels = [
-#                 np.load(p, mmap_mode="r") for p in self.mel_paths
-#             ]
-#             self._labels = [
-#                 np.load(p, mmap_mode="r") for p in self.label_paths
-#             ]
-
-#     def __len__(self):
-#         return int(self.cum_sizes[-1])
-
-#     def __getitem__(self, idx):
-#         self._lazy_init()
-
-#         shard_id = np.searchsorted(self.cum_sizes, idx, side="right")
-#         prev = 0 if shard_id == 0 else self.cum_sizes[shard_id - 1]
-#         local_idx = idx - prev
-
-#         x = torch.tensor(self._mels[shard_id][local_idx])
-#         y = self._labels[shard_id][local_idx]
-#         if self.task=='Full':
-#             y = torch.tensor(y)
-#         elif self.task=='Cmd20':
-#             y = torch.tensor(INDEX20[y])
-#         return x, y
