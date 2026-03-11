@@ -148,11 +148,11 @@ class DESkipNetwork(DEFwdNetwork):
         self.layers[1].downstream = self.layers[3].downstream
         self.layers[1].downstream_mask = self.layers[3].downstream_mask
         self.layers[1].TauDE = self.layers[3].TauDE
-        self.layers[1].dt_tau_de = self.layers[3].TauDE
+        self.layers[1].dt_tau_de = self.layers[3].dt_tau_de
         self.layers[1].decay_de = self.layers[3].decay_de
 
         self.layers[2].rho.scale = 1.
-        self.skip_weight = 0.2
+        self.skip_weight = 0.2 #??
 
     def prop(self, error=0., learn=True):      
         self.layers[6].E_trg(e_trg=self.beta*error*self.dt)

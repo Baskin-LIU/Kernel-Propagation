@@ -35,7 +35,7 @@ default_data_config = {
 
 default_train_config = {
     'num_epochs': 150, 
-    'learning_rate': 8e-3, 
+    'learning_rate': 5e-3, 
     'batch_size': 100, 
     }
 
@@ -53,7 +53,8 @@ default_model_config = {
     'Tau1': [3, 6], 
     'Tau2': [2, 7],
     'Tau3': [1, 8.0, 12.0],
-    "answer_period":300,
+    "answer_period": 360,
+    "upsample": True,
     }
 
 
