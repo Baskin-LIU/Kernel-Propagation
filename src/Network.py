@@ -152,7 +152,7 @@ class DESkipNetwork(DEFwdNetwork):
         self.layers[1].decay_de = self.layers[3].decay_de
 
         self.layers[2].rho.scale = 1.
-        self.skip_weight = 0.2 #??
+        self.skip_weight = 1 #??
 
     def prop(self, error=0., learn=True):      
         self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
