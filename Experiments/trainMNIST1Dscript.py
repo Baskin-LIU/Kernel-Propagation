@@ -37,14 +37,14 @@ if __name__ == "__main__":
     #parser.add_argument("--machine", type=str, default="MLcloud")
     
     ### Training config
-    parser.add_argument("--lr", type=float, default=8e-3)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--num_epochs", type=int, default=150)
-    parser.add_argument("--answer_t", type=int, default=300)
+    parser.add_argument("--answer_t", type=int, default=360)
     parser.add_argument("--method", type=str, default='KP')
     parser.add_argument("--update_interval", type=int, default=-1)
 
     ### Data config
-    parser.add_argument("--prepad", type=int, default=10)
+    parser.add_argument("--prepad", type=int, default=0)
     parser.add_argument("--batch", type=int, default=100)
     
     ### Model config
@@ -52,14 +52,19 @@ if __name__ == "__main__":
     parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[90, 90, 90, 90],)
+        help="Hidden Low-pass layer sizes", default=[60, 90, 90, 90],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[120, ],)
     parser.add_argument("--Tau0", type=int, nargs=3, default=[1, 10, 6],)
-    parser.add_argument("--Tau1", type=int, nargs="+", default=[3, 6],)
-    parser.add_argument("--Tau2", type=int, nargs="+", default=[2, 7],)
-    parser.add_argument("--Tau3", type=int, nargs="+", default=[1, 8., 12.],)
+    parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 6],)
+    parser.add_argument("--Tau2", type=float, nargs="+", default=[2, 7],)
+    parser.add_argument("--Tau3", type=float, nargs="+", default=[2.5, 8.],)
+    parser.add_argument("--Tau4", type=float, nargs="+", default=[2.5, 6.6],)
+    parser.add_argument("--upsample", dest="upsample", action="store_true")
+    parser.add_argument("--skip", dest="skip", action="store_true")
+    parser.add_argument("--small", dest="small", action="store_true")
     
-    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True)
+    parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, 
+                        upsample=False, skip=False, small=False)
     
     args = parser.parse_args()
 
@@ -98,9 +103,9 @@ if __name__ == "__main__":
     model_config["Ins_size"] = args.Ins_size[:args.num_Ins_layers]
     model_config["activation"] = args.activation
     model_config["answer_period"] = args.answer_t
-    
     for i in range(model_config["num_LP_layers"]):
         model_config["Tau%d"%i] =getattr(args, "Tau%d"%i)
+    model_config["upsample"] = args.upsample
 
     # Training Config
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
@@ -118,6 +123,19 @@ if __name__ == "__main__":
     pad_steps = int(data_config["prepad"]/dt)
     data_config["final_seq_length"] = int(data_config["duration"]/dt)
 
+    if args.small: #small model (14k) quick config
+        model_config["LP_size"] = [36, 54, 60, 60] # acc 92
+        model_config["Ins_size"] = [72]
+
+    if args.skip: #small skip connection quick config
+        model_config['skip_connection'] = "One"
+        model_config["LP_size"] = [60, 60, 60, 60, 72]
+        model_config["Ins_size"] = [72]
+        model_config["num_LP_layers"] = 5
+        model_config["num_Ins_layers"] = 1
+        model_config['Tau3'] = [1, 8.0]
+        model_config['Tau4'] = args.Tau4 #[2.5, 6.6]
+
     ########## Logging Config ##########
     print("Wandb configuration started...")
 
@@ -130,7 +148,7 @@ if __name__ == "__main__":
     api_key_file = Path("~/.wandbAPIkey.txt").expanduser().resolve()
     project_name = "MNIST1D"
     group_name = args.group_name
-
+        
     # login to wandb
     with open(api_key_file, "r") as file:
         api_key = file.read().strip()
@@ -161,21 +179,19 @@ if __name__ == "__main__":
     x, y = torch.tensor(data['x'],dtype=torch.float32).unsqueeze(-1), torch.tensor(data['y'], dtype=torch.int64)
     x_test, y_test = torch.tensor(data['x_test'],dtype=torch.float32).unsqueeze(-1), torch.tensor(data['y_test'], dtype=torch.int64)
 
-    # init network and optimizer
     # Init network and optimizer
     if args.method=='BPTT':
-        model = buildNetCompare(model_config, general_config, neurontype='GLE').to(device)
+        model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         train_fn = train_batch_BPTT
+        factor = 0.75
+        adam_beta = (0.9, 0.999)
     else:
-        if args.update_interval==-1:
-            train_fn = train_batch_delay
-        else:
-            train_fn = train_batch_periodic(args.update_interval)
+        train_fn = train_batch_delay
+        factor = 0.75
+        adam_beta = (0.8, 0.995)
         if args.method=='KP':
             model = buildKPNet(model_config, general_config).to(device)
-        elif args.method=='GLE':
-            model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
-        elif args.method=='RFLO':
+        elif args.method in ['GLE','RF/E','LE']:
             model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError
@@ -185,13 +201,13 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=train_config["learning_rate"],
-        betas=(0.9, 0.999)
+        betas=adam_beta
     )
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
-        factor=0.75,
+        factor=factor,
         patience=2
     )
 
@@ -218,7 +234,7 @@ if __name__ == "__main__":
             total=permu.shape[0],
         )
         for idx in pbar:
-            total_error = train_batch_delay(model, optimizer, x[idx].to(device),
+            total_error = train_fn(model, optimizer, x[idx].to(device),
                                             y[idx].to(device), answer_steps, pad_steps, beta)
             Cum_errors += total_error
         Cum_errors /= permu.shape[0]

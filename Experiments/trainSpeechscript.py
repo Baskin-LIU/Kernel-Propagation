@@ -59,12 +59,12 @@ if __name__ == "__main__":
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
-    parser.add_argument("--num_LP_layers", type=int, default=4)
+    parser.add_argument("--num_LP_layers", type=int, default=5)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[240, 300, 300, 360],)
+        help="Hidden Low-pass layer sizes", default=[300, 300, 300, 300, 360],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 40, 6],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 40, 30],)
     parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 12, 24],)
     parser.add_argument("--Tau2", type=float, nargs="+", default=[4, 16, 36],)
     parser.add_argument("--Tau3", type=float, nargs="+", default=[5, 14],)
@@ -217,7 +217,7 @@ if __name__ == "__main__":
         train_fn = train_batch_BPTT
         adam_betas = (0.9, 0.999)
     else:
-        adam_betas = (0.9, 0.999)
+        adam_betas = (0.8, 0.999)
         if args.update_interval==-1:
             train_fn = train_batch_delay
         else:

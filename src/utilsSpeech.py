@@ -80,7 +80,7 @@ default_model_config = {
     'num_LP_layers': 5, 
     'num_Ins_layers': 1,
     'rho_scale': 0.6,
-    'LP_size': [90, 120, 120, 120, 150], 
+    'LP_size': [120, 120, 120, 120, 150], 
     'Ins_size': [150, ], 
     'activation': 'tanh', 
     "reducedNonlinear": False,
@@ -90,7 +90,7 @@ default_model_config = {
     'Tau3': [5, 20],
     'Tau4': [100, 400],
     "answer_period": 600,
-    "skip_connection": True,
+    "skip_connection": "All",
     }
 
 

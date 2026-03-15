@@ -22,9 +22,8 @@
         7
     ],
     "Tau3": [
-        1,
-        8.0,
-        12.0
+        2.5,
+        8.0
     ],
     "activation": "tanh",
     "answer_period": 360,
@@ -32,5 +31,8 @@
     "n_out": 10,
     "num_Ins_layers": 1,
     "num_LP_layers": 4,
-    "reducedNonlinear": false
+    "reducedNonlinear": false,
+    "rho_scale": 0.6,
+    "skip_connection": false,
+    "upsample": false
 }

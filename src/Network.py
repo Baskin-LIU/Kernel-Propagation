@@ -36,9 +36,8 @@ class FwdNetwork(torch.nn.Module):
         r = r_in
         for i, l in enumerate(self.layers):
             r, u = l.step(r_in=r, noise=noise)
-            if i == (self.learn_depth-1):
-                r = r.detach()
-
+            # if i == (self.learn_depth-1):
+            #     r = r.detach()
         return r, u
 
     
@@ -163,8 +162,11 @@ class DESkipNetwork(DEFwdNetwork):
         self.layers[2].prop(learn=False)
         if learn:
             self.layers[1].K = self.layers[3].K * self.skip_weight
-        self.layers[1].prop(learn=learn)
-        self.layers[0].prop(learn=False)
+        if self.learn_depth==0:
+            self.layers[1].prop(learn=learn)
+            self.layers[0].prop(learn=False)
+        else:
+            self.layers[1].prop(learn=False)
 
     def step(self, r_in, noise=0):
         r0,_ = self.layers[0].step(r_in=r_in)
@@ -231,7 +233,7 @@ class SkipNetwork(FwdNetwork):
     def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
         super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
         self.layers[2].rho.scale = 1.
-        self.skip_weight = 0.2
+        self.skip_weight = 1
 
     def prop(self, error=0., learn=True):      
         self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
@@ -249,7 +251,8 @@ class SkipNetwork(FwdNetwork):
     def step(self, r_in, noise=0):
         r0,_ = self.layers[0].step(r_in=r_in)
         r1,_ = self.layers[1].step(r_in=r0)
-        r2,_ = self.layers[2].step(r_in=r1.detach())
+        r1_detached = r1.clone().detach().requires_grad_(False)
+        r2,_ = self.layers[2].step(r_in=r1_detached)
         r3,_ = self.layers[3].step(r_in=r2)
         r4,_ = self.layers[4].step(r_in=r1*self.skip_weight+r3)
         r5,_ = self.layers[5].step(r_in=r4) #ins
@@ -258,7 +261,44 @@ class SkipNetwork(FwdNetwork):
         return r, u
 
 
+class DEAllSkipNetwork(DEFwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
+        self.layers[4].P = self.layers[4].P[:self.layers[4].n_tau]
+        for i in [0, 1, 2]:
+            self.layers[i].downstream = self.layers[3].downstream
+            self.layers[i].downstream_mask = self.layers[3].downstream_mask
+            self.layers[i].TauDE = self.layers[3].TauDE
+            self.layers[i].dt_tau_de = self.layers[3].dt_tau_de
+            self.layers[i].decay_de = self.layers[3].decay_de
+            self.layers[i].rho.scale = 1.
 
+
+    def prop(self, error=0., learn=True):      
+        self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[6].prop(learn=learn)
+        self.layers[5].prop(learn=learn)
+        self.layers[4].prop(learn=learn)
+        self.layers[3].prop(learn=False)
+        self.layers[2].prop(learn=False)
+        self.layers[1].prop(learn=False)
+        self.layers[0].prop(learn=False)
+        if learn:
+            self.layers[0].K = self.layers[3].K * 0.2
+            self.layers[1].K = self.layers[3].K * 0.3
+            self.layers[2].K = self.layers[3].K * 0.4
+            self.layers[3].K = self.layers[3].K * 0.5
+
+    def step(self, r_in, noise=0):
+        r0,_ = self.layers[0].step(r_in=r_in)
+        r1,_ = self.layers[1].step(r_in=r0.detach())
+        r2,_ = self.layers[2].step(r_in=r1.detach())
+        r3,_ = self.layers[3].step(r_in=r2.detach())
+        r4,_ = self.layers[4].step(r_in=r3*0.5+r2*0.4+r1*0.3+r0*0.2)
+        r5,_ = self.layers[5].step(r_in=r4) #ins
+        r,u  = self.layers[6].step(r_in=r5)
+
+        return r, u
             
 
 

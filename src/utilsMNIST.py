@@ -35,7 +35,7 @@ default_data_config = {
 
 default_train_config = {
     'num_epochs': 150, 
-    'learning_rate': 5e-3, 
+    'learning_rate': 1e-2, 
     'batch_size': 100, 
     }
 
@@ -52,9 +52,10 @@ default_model_config = {
     'Tau0': [1, 10, 6], 
     'Tau1': [3, 6], 
     'Tau2': [2, 7],
-    'Tau3': [1, 8.0, 12.0],
+    'Tau3': [2.5, 8.0],
     "answer_period": 360,
-    "upsample": True,
+    "upsample": False,
+    "skip_connection":False
     }
 
 
@@ -166,6 +167,7 @@ def test_mul(model, x_test, y_test, answer_step, pad_steps, beta):
 
 def train_batch_BPTT(model, optimizer, x, y, answer_step, pad_steps, beta):
     n_steps = x.shape[1]
+    one_hot_label = F.one_hot(y, num_classes=10)
     model.reset()
     prex = torch.zeros(x.shape[0], 1).to(model.device)
     total_loss = 0.
@@ -175,11 +177,27 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, pad_steps, beta):
         r_out,_ = model.step(x[:, t])
         if n_steps-t <= answer_step:
             p = torch.softmax(r_out, dim=1)
-            total_loss += -(y * torch.log(p)).mean()*beta[t]
+            total_loss += -(one_hot_label * torch.log(p)).mean().sum()*beta[t]
     total_loss.backward()
     optimizer.step()
     optimizer.zero_grad()
             
     return total_loss.detach()
 
+# def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
+#     n_steps = x.shape[-1]
+#     model.reset()
+#     #class_weight = torch.ones(21).to(model.device)
+#     #class_weight[-1] = 0.6
+#     total_loss = 0.
+#     for t in range(n_steps):
+#         r_out,_ = model.step(x[:, :, t])
+#         if n_steps-t <= answer_step:
+#             p = torch.softmax(r_out, dim=1)
+#             total_loss += -(y*torch.log(p)).mean(dim=1).sum()*beta[t]
+#     total_loss.backward()
+#     optimizer.step()
+#     optimizer.zero_grad()
+            
+#     return total_loss.detach()
 
