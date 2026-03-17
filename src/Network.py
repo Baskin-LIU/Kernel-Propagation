@@ -299,6 +299,25 @@ class DEAllSkipNetwork(DEFwdNetwork):
         r,u  = self.layers[6].step(r_in=r5)
 
         return r, u
+
+
+class AllSkipNetwork(FwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
+        for l in self.layers:
+            l.rho.scale = 1.
+    #def prop(self, error=0., learn=True):      
+
+    def step(self, r_in, noise=0):
+        r0,_ = self.layers[0].step(r_in=r_in)
+        r1,_ = self.layers[1].step(r_in=r0.detach())
+        r2,_ = self.layers[2].step(r_in=r1.detach())
+        r3,_ = self.layers[3].step(r_in=r2.detach())
+        r4,_ = self.layers[4].step(r_in=r3*0.5+r2*0.4+r1*0.3+r0*0.2)
+        r5,_ = self.layers[5].step(r_in=r4) #ins
+        r,u  = self.layers[6].step(r_in=r5)
+
+        return r, u
             
 
 

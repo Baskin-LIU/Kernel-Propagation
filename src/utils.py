@@ -195,11 +195,23 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
             )
     )
         
-    if 'skip_connection' in model_config and model_config['skip_connection']:
-        model = SkipNetwork(layers=layers, dt=dt, device=device)
-        print("skip connection activated")
+    # if 'skip_connection' in model_config and model_config['skip_connection']:
+    #     model = SkipNetwork(layers=layers, dt=dt, device=device)
+    #     print("skip connection activated")
+    # else:
+    #     model = FwdNetwork(layers=layers, dt=dt, device=device)
+
+    if 'skip_connection' in model_config:
+        if model_config['skip_connection']=='All':
+            model = AllSkipNetwork(layers=layers, device=device, dt=dt)
+            print("All skip connections activated")
+        elif model_config['skip_connection']=="One":
+            model = SkipNetwork(layers=layers, device=device, dt=dt)
+            print("A skip connection activated")
+        else:
+            model = FwdNetwork(layers=layers, device=device, dt=dt)
     else:
-        model = FwdNetwork(layers=layers, dt=dt, device=device)
+        model = DEFwdNetwork(layers=layers, device=device, dt=dt)
 
     if 'upsample' in model_config and model_config["upsample"]:
         print("Upsample Input")
