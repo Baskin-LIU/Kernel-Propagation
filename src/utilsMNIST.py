@@ -59,33 +59,42 @@ default_model_config = {
     }
 
 
-def train_batch_periodic(model, optimizer, x, y, answer_step, pad_steps, beta, update_period=10):
-    n_steps = x.shape[1]
-    avg_p = 0.
-    with torch.no_grad():
-        one_hot_label = F.one_hot(y, num_classes=10)
-        model.reset()
-        prex = torch.zeros(x.shape[0], 1).to(model.device)
-        for t in range(pad_steps):
-            r_out,_ = model.step(prex)
-            model.prop(learn=False)
-        for t in range(n_steps):
-            r_out,_ = model.step(x[:, t])
-            if n_steps-t <= answer_step:
-                p = torch.softmax(r_out, dim=1)
-                error = (one_hot_label - p)*beta[t]
-                model.prop(error=error)
-                model.backwards()
-                if t%update_period==0:
-                    optimizer.step()
-                    optimizer.zero_grad(set_to_none=False)
-                avg_p = p + avg_p
-            else:
+class train_batch_periodic:
+    def __init__(self, update_timing = [359]):
+        self.update_timing = update_timing
+        
+    def __call__(self, model, optimizer, x, y, answer_step, pad_steps, beta):
+        n_steps = x.shape[1]
+        avg_p = 0.
+        with torch.no_grad():
+            one_hot_label = F.one_hot(y, num_classes=10)
+            model.reset()
+            prex = torch.zeros(x.shape[0], 1).to(model.device)
+            for t in range(pad_steps):
+                r_out,_ = model.step(prex)
                 model.prop(learn=False)
-        avg_p /= answer_step
-        total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
-            
-    return total_loss
+            for t in range(n_steps):
+                r_out,_ = model.step(x[:, t])
+                if n_steps-t <= answer_step:
+                    p = torch.softmax(r_out, dim=1)
+                    if beta[t] != 0:
+                        error = (one_hot_label - p)*beta[t]
+                        model.prop(error=error)
+                        model.backwards()
+                    else:
+                        model.prop(learn=False)
+                    avg_p = p + avg_p
+                    if t in self.update_timing:
+                        optimizer.step()
+                        optimizer.zero_grad(set_to_none=False)
+                else:
+                    model.prop(learn=False)
+        
+            avg_p /= answer_step
+            total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
+                
+        return total_loss
+        
 
 def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
     n_steps = x.shape[1]
@@ -93,7 +102,6 @@ def train_batch_delay(model, optimizer, x, y, answer_step, pad_steps, beta):
     with torch.no_grad():
         one_hot_label = F.one_hot(y, num_classes=10)
         model.reset()
-        #optimizer.zero_grad(set_to_none=False)
         prex = torch.zeros(x.shape[0], 1).to(model.device)
         for t in range(pad_steps):
             r_out,_ = model.step(prex)
@@ -139,6 +147,7 @@ def test(model, x_test, y_test, answer_step, pad_steps, beta):
 
     return acc_p, loss
 
+    
 def test_mul(model, x_test, y_test, answer_step, pad_steps, beta):
     #test differen ways to generate prediction
     test_size, n_steps, _ = x_test.shape
@@ -183,21 +192,4 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, pad_steps, beta):
     optimizer.zero_grad()
             
     return total_loss.detach()
-
-# def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
-#     n_steps = x.shape[-1]
-#     model.reset()
-#     #class_weight = torch.ones(21).to(model.device)
-#     #class_weight[-1] = 0.6
-#     total_loss = 0.
-#     for t in range(n_steps):
-#         r_out,_ = model.step(x[:, :, t])
-#         if n_steps-t <= answer_step:
-#             p = torch.softmax(r_out, dim=1)
-#             total_loss += -(y*torch.log(p)).mean(dim=1).sum()*beta[t]
-#     total_loss.backward()
-#     optimizer.step()
-#     optimizer.zero_grad()
-            
-#     return total_loss.detach()
 
