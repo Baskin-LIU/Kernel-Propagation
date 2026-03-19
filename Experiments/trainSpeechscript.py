@@ -69,6 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("--Tau2", type=float, nargs="+", default=[4, 16, 36],)
     parser.add_argument("--Tau3", type=float, nargs="+", default=[5, 14],)
     parser.add_argument("--Tau4", type=float, nargs="+", default=[6, 15],)
+    parser.add_argument("--Tau5", type=float, nargs="+", default=[7, 18],)
     parser.add_argument("--TauL", type=float, nargs="+", default=[50, 400],) #Last LP layer
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, weighted_sampler=False, cont_train=False)
@@ -238,7 +239,7 @@ if __name__ == "__main__":
         betas=adam_betas,
     )
     
-    train_config["factor"] = 0.5 if args.method=='BPTT' else 0.6
+    train_config["factor"] = 0.75 if args.method=='BPTT' else 0.6
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',

@@ -309,13 +309,26 @@ class AllSkipNetwork(FwdNetwork):
     #def prop(self, error=0., learn=True):      
 
     def step(self, r_in, noise=0):
-        r0,_ = self.layers[0].step(r_in=r_in)
-        r1,_ = self.layers[1].step(r_in=r0.detach())
-        r2,_ = self.layers[2].step(r_in=r1.detach())
-        r3,_ = self.layers[3].step(r_in=r2.detach())
-        r4,_ = self.layers[4].step(r_in=r3*0.5+r2*0.4+r1*0.3+r0*0.2)
-        r5,_ = self.layers[5].step(r_in=r4) #ins
-        r,u  = self.layers[6].step(r_in=r5)
+        # r0,_ = self.layers[0].step(r_in=r_in)
+        # r1,_ = self.layers[1].step(r_in=r0.detach())
+        # r2,_ = self.layers[2].step(r_in=r1.detach())
+        # r3,_ = self.layers[3].step(r_in=r2.detach())
+        # r4,_ = self.layers[4].step(r_in=r3*0.5+r2*0.4+r1*0.3+r0*0.2)
+        # r5,_ = self.layers[5].step(r_in=r4) #ins
+        # r,u  = self.layers[6].step(r_in=r5)
+        
+        r_prev = r_in
+        weight = 0.2
+        r_in_L = 0
+        
+        for l in self.layers[:-3]:
+            r,_ = l.step(r_in=r_prev)
+            r_in_L += weight * r
+            r_prev = r.detach()
+            weight += 0.1
+        r,_ = self.layers[-3].step(r_in_L)
+        r,_ = self.layers[-2].step(r)
+        r,u = self.layers[-1].step(r)
 
         return r, u
             
