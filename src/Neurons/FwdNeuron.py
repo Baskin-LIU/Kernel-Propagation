@@ -132,6 +132,7 @@ class FwdNeurons(Neurons):
             self.bias += self.dbias * self.lr_b
             self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
+        return [0]
     
     def backwards(self, ):
         self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(dim=0)
@@ -206,6 +207,7 @@ class FwdGLENeurons(FwdNeurons):
             self.bias += self.dbias * self.lr_b
             self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
+        return [0]
 
     def backwards(self, ):
         self.W_in.grad -= (self.mismatch.unsqueeze(dim=-1) * self.r_in[:,None,:]).mean(0)
@@ -238,8 +240,12 @@ class FwdRFNeurons(FwdNeurons):
         if update:
             self.W_in += self.dW_in * self.lr_w
             self.bias += self.dbias * self.lr_b
+            dW_ = self.dW_in.clone()
+            dbias_ = self.dbias.clone()
             self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
+            return [dW_, dbias_]
+        return [0]
 
     def backwards(self, ):
         self.W_in.grad -= (self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)

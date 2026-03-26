@@ -31,6 +31,12 @@ class LastFwdDENeurons(FwdNeurons):
 
     def reset(self,):
         super().reset_uniq()
+
+    def comp_grad(self):
+        dW_in = -(self.epsilon.unsqueeze(dim=-1) * self.r_bar).mean(0)
+        dbias = -self.epsilon.mean(0)
+
+        return (dW_in, dW_in) , (dbias, dbias)
         
 
 
@@ -55,7 +61,6 @@ class FwdDENeurons(FwdNeurons):
         return 0, 0
     
     def learnW(self, update=True):
-        #K = self.K[:,:self.downstream].clone()
         K = self.K[:,self.downstream_mask].clone()
         self.dW_in += (K.unsqueeze(-1)*self.elig).sum(1).mean(0)
         self.dbias += (K * self.elig_b).sum(1).mean(0)
@@ -64,6 +69,7 @@ class FwdDENeurons(FwdNeurons):
             self.bias += self.dbias * self.lr_b
             self.dW_in = torch.zeros(self.n_neurons, self.n_in).to(self.device)
             self.dbias = torch.zeros(self.n_neurons).to(self.device)
+        
 
     def backwards(self, ):
         K = self.K[:,self.downstream_mask].clone()
@@ -75,6 +81,26 @@ class FwdDENeurons(FwdNeurons):
         self.elig = torch.zeros(1,self.downstream,self.n_neurons,self.n_in).to(self.device)
         self.elig_b = torch.zeros(1, self.downstream, self.n_neurons).to(self.device)
 
+        self.rhod_bar = torch.zeros(1, self.n_neurons).to(self.device)
+
+    def comp_grad(self):
+        K = self.K[:,self.downstream_mask].clone()
+        dW_in = -(K.unsqueeze(-1)*self.elig).sum(1).mean(0)
+        dbias = -(K * self.elig_b).sum(1).mean(0)
+
+        self.rhod_bar = self.rhod_bar * self.decay[None, :] + self.rho.d * self.dt_tau[None, :]
+        if self.previous_layer is not None: 
+            if hasattr(self, 'Kv2'):
+                self.previous_layer[0].Kv2 = (self.rhod_bar[:, None, :] * self.P * self.Kv2) @ self.W_in
+            else:
+                self.previous_layer[0].Kv2 = (self.rhod_bar[:, None, :] * self.P * self.K) @ self.W_in
+        if hasattr(self, 'Kv2'):
+            K2 = self.Kv2[:,self.downstream_mask].clone()
+            dW_in2 = -(K2.unsqueeze(-1)*self.elig).sum(1).mean(0)
+            dbias2 = -(K2 * self.elig_b).sum(1).mean(0)
+            return (dW_in,dW_in2) , (dbias, dbias2)
+
+        return (dW_in, dW_in) , (dbias, dbias)
 
 ##TODO Reduced version. r_bar in hidden neurons with same tau can be shared. Which can also be used for forwarding W r_bar.
 class FwdDENeuronsReduced(FwdDENeurons):
@@ -125,4 +151,26 @@ class FwdDEInsNeurons(FwdDENeurons):
 
 
 
+class FwdDENeuronsV2(FwdDENeurons):
+
+    def prop(self, learn=True):
+        # Update eligibility trace (batch, n_exp, n_neuron, n_in)
+        self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:
+            ,None,None] * (self.rho.d[:,None,:,None] * self.r_bar[:,None,:,:])
+        # Bias eligibility (batch, n_exp, n_neuron)
+        self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
+
+        self.rhod_bar = self.rhod_bar * self.decay[None, :] + self.rho.d * self.dt_tau[None, :]
+        # Kernel propagation
+        if learn and self.previous_layer is not None:  
+            #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
+            self.previous_layer[0].K = (self.rhod_bar[:, None, :] * self.P * self.K) @ self.W_in
+        
+        return 0, 0
+
+    def reset(self,):
+        super().reset_uniq()
+        self.elig = torch.zeros(1,self.downstream,self.n_neurons,self.n_in).to(self.device)
+        self.elig_b = torch.zeros(1, self.downstream, self.n_neurons).to(self.device)
+        self.rhod_bar = torch.zeros(1, self.n_neurons).to(self.device)
 

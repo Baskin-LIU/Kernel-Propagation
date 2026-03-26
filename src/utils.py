@@ -21,9 +21,15 @@ def buildKPNet(model_config, general_config):
                                           LP_size[i+1]//tau_uniq.shape[0]))
     layers = torch.nn.ModuleList()
     prev_n=model_config['n_in']
+
+    if model_config["version"]=="V2":
+        Neurons = FwdDENeuronsV2
+        print("rho bar")
+    else:
+        Neurons = FwdDENeurons
     
     layers.append(
-        FwdDENeurons(
+        Neurons(
             n_in=prev_n,
             n_neurons=LP_size[0],
             tau=tau[0], 
@@ -51,7 +57,7 @@ def buildKPNet(model_config, general_config):
     else:
         for i in range(model_config['num_LP_layers']-2):
             layers.append(
-                FwdDENeurons(
+                Neurons(
                     n_in=prev_n,
                     n_neurons=LP_size[i+1],
                     tau=tau[i+1], 

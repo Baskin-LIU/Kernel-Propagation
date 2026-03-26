@@ -22,7 +22,7 @@ class FwdNetwork(torch.nn.Module):
             
             l = net.layers[-1]
             self.layers.append(FwdNeurons(n_in=l.n_in, n_neurons=l.n_neurons, tau=l.tau, lr_w=l.lr_w, bias=l.bias.detach().clone(),
-                      W_in=l.W_in.detach().clone(), activation=l.activation, dt=l.dt))
+                      W_in=l.W_in.detach().clone(), activation=l.activation, dt=l.dt, scale=l.scale))
                 
         self.n_layer = len(self.layers)   
         for i, l in enumerate(self.layers):
@@ -212,20 +212,24 @@ class RTRLNetwork(FwdNetwork):
                 rhod = l_.rho.d
             l.P_last = l.P[j+1]
             l.P_bias_last = l.P_bias[j+1]
-            
-            
 
     def learnW(self, update=True):
-        self.layers[-1].learnW(update)
-        self.layers[-2].learnW(update)
+        Grads = []
         for i, l in enumerate(self.layers[:-2]):
             l.dW_in += (l.P_last * self.last_epsi).sum(-1).mean(0)
             l.dbias += (l.P_bias_last * self.last_epsi).sum(-1).mean(0)
             if update:
                 l.W_in += l.dW_in * l.lr_w
                 l.bias += l.dbias * l.lr_b
+                grad = [l.dW_in.clone(), l.dbias.clone()]
+                Grads.append(grad)
                 l.dW_in = torch.zeros(l.n_neurons, l.n_in).to(self.device)
                 l.dbias = torch.zeros(l.n_neurons).to(self.device)
+        grad = self.layers[-2].learnW(update)
+        Grads.append(grad)
+        grad = self.layers[-1].learnW(update)
+        Grads.append(grad)
+        return Grads
 
 
 
