@@ -449,8 +449,6 @@ def test_analy_confusion(model, data_loader, answer_step, beta, num_classes=None
 def train_batch_BPTT(model, optimizer, x, y, answer_step, beta):
     n_steps = x.shape[-1]
     model.reset()
-    #class_weight = torch.ones(21).to(model.device)
-    #class_weight[-1] = 0.6
     total_loss = 0.
     for t in range(n_steps):
         r_out,_ = model.step(x[:, :, t])
