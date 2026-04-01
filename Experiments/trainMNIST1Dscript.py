@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=150)
     parser.add_argument("--answer_t", type=int, default=360)
     parser.add_argument("--method", type=str, default='KP')
-    parser.add_argument("--update_interval", type=int, default=-1)
+    parser.add_argument("--update_times", type=int, default=3)
 
     ### Data config
     parser.add_argument("--prepad", type=int, default=0)
@@ -49,6 +49,7 @@ if __name__ == "__main__":
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
+    parser.add_argument("--rho_scale", type=float, default=0.6)
     parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
@@ -106,13 +107,14 @@ if __name__ == "__main__":
     for i in range(model_config["num_LP_layers"]):
         model_config["Tau%d"%i] =getattr(args, "Tau%d"%i)
     model_config["upsample"] = args.upsample
+    model_config["rho_scale"] = args.rho_scale
 
     # Training Config
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
     train_config["learning_rate"] = args.lr
     train_config["batch_size"] = args.batch
     train_config["method"] = args.method
-    train_config["update_interval"] = args.update_interval
+    train_config["update_times"] = args.update_times
     
     # Dataset Config
     data_config["prepad"] = args.prepad
@@ -132,7 +134,6 @@ if __name__ == "__main__":
         model_config["LP_size"] = [60, 60, 60, 60, 72]
         model_config["Ins_size"] = [72]
         model_config["num_LP_layers"] = 5
-        model_config["num_Ins_layers"] = 1
         model_config['Tau3'] = [1, 8.0]
         model_config['Tau4'] = args.Tau4 #[2.5, 6.6]
 
@@ -147,7 +148,10 @@ if __name__ == "__main__":
     # wandb config
     api_key_file = Path("~/.wandbAPIkey.txt").expanduser().resolve()
     project_name = "MNIST1D"
-    group_name = args.group_name
+    if args.method == "KP":
+        group_name = args.group_name + model_config["version"]
+    else:
+        group_name = args.group_name + args.method
         
     # login to wandb
     with open(api_key_file, "r") as file:
@@ -186,7 +190,11 @@ if __name__ == "__main__":
         factor = 0.75
         adam_beta = (0.9, 0.999)
     else:
-        train_fn = train_batch_delay
+        if train_config["update_times"]>1:
+            update_timing = n_steps-np.linspace(0, n_steps, num=train_config["update_times"], endpoint=False, dtype=np.int16)-1
+            train_fn = train_batch_periodic(update_timing = update_timing)
+        else:
+            train_fn = train_batch_delay
         factor = 0.75
         adam_beta = (0.8, 0.995)
         if args.method=='KP':

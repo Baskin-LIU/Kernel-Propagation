@@ -180,59 +180,6 @@ class DESkipNetwork(DEFwdNetwork):
         return r, u
 
 
-class RTRLNetwork(FwdNetwork):
-    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
-        super().__init__(net=net, layers=FwdRFNeurons, beta=beta, dt=dt, device=device)
-
-    def reset(self, batch=1):
-        for l in self.layers:
-            l.reset()
-        for i, l in enumerate(self.layers[:-2]):
-            l.P = {}
-            l.P_bias = {}
-            l.I = torch.eye(l.n_neurons, device=self.device)
-            l.P_bias[0] = torch.ones(batch, l.n_neurons, l.n_neurons) * l.I[None, :, :]
-            for j, l_ in enumerate(self.layers[i+1:-1]):
-                l.P[j+1] = torch.zeros(batch, l.n_neurons, l.n_in, l_.n_neurons)
-                l.P_bias[j+1] = torch.zeros(batch, l.n_neurons, l_.n_neurons)
-            
-    def prop(self, error=0., learn=True):
-        self.layers[-1].E_trg(e_trg=self.beta*error*self.dt)
-        self.layers[-1].prop()
-        self.layers[-2].prop()
-        self.last_epsi = self.layers[-2].epsilon
-        for i, l in enumerate(self.layers[:-2]): #W_l
-            rhod = l.rho.d
-            l.P[0] = l.r_bar[:, :, :, None] * l.I[None, :, None, :]   # [B, n_l, n_in, 1]
-            for j, l_ in enumerate(self.layers[i+1:-1]): #du_l_/dW
-                l.P[j+1] = l_.decay[None, None, None, :] * l.P[j+1] + l_.dt_tau[None, None, 
-                    None, :] * ((l.P[j] * rhod[:, None, None, :]) @ l_.W_in.T)
-                l.P_bias[j+1] = l_.decay[None, None, :] * l.P_bias[j+1] + l_.dt_tau[None, 
-                    None, :] * ((l.P_bias[j] * rhod[:, None, :]) @ l_.W_in.T)
-                rhod = l_.rho.d
-            l.P_last = l.P[j+1]
-            l.P_bias_last = l.P_bias[j+1]
-
-    def learnW(self, update=True):
-        Grads = []
-        for i, l in enumerate(self.layers[:-2]):
-            l.dW_in += (l.P_last * self.last_epsi).sum(-1).mean(0)
-            l.dbias += (l.P_bias_last * self.last_epsi).sum(-1).mean(0)
-            if update:
-                l.W_in += l.dW_in * l.lr_w
-                l.bias += l.dbias * l.lr_b
-                grad = [l.dW_in.clone(), l.dbias.clone()]
-                Grads.append(grad)
-                l.dW_in = torch.zeros(l.n_neurons, l.n_in).to(self.device)
-                l.dbias = torch.zeros(l.n_neurons).to(self.device)
-        grad = self.layers[-2].learnW(update)
-        Grads.append(grad)
-        grad = self.layers[-1].learnW(update)
-        Grads.append(grad)
-        return Grads
-
-
-
 class SkipNetwork(FwdNetwork):
     def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
         super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
@@ -313,13 +260,6 @@ class AllSkipNetwork(FwdNetwork):
     #def prop(self, error=0., learn=True):      
 
     def step(self, r_in, noise=0):
-        # r0,_ = self.layers[0].step(r_in=r_in)
-        # r1,_ = self.layers[1].step(r_in=r0.detach())
-        # r2,_ = self.layers[2].step(r_in=r1.detach())
-        # r3,_ = self.layers[3].step(r_in=r2.detach())
-        # r4,_ = self.layers[4].step(r_in=r3*0.5+r2*0.4+r1*0.3+r0*0.2)
-        # r5,_ = self.layers[5].step(r_in=r4) #ins
-        # r,u  = self.layers[6].step(r_in=r5)
         
         r_prev = r_in
         weight = 0.2
@@ -337,14 +277,108 @@ class AllSkipNetwork(FwdNetwork):
         return r, u
             
 
+class RTRLNetwork(FwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=FwdRFNeurons, beta=beta, dt=dt, device=device)
+
+    def reset(self, batch=1):
+        for l in self.layers:
+            l.reset()
+        for i, l in enumerate(self.layers[:-2]):
+            l.P = {}
+            l.P_bias = {}
+            l.I = torch.eye(l.n_neurons, device=self.device)
+            l.P_bias[0] = torch.ones(batch, l.n_neurons, l.n_neurons) * l.I[None, :, :]
+            for j, l_ in enumerate(self.layers[i+1:-1]):
+                l.P[j+1] = torch.zeros(batch, l.n_neurons, l.n_in, l_.n_neurons)
+                l.P_bias[j+1] = torch.zeros(batch, l.n_neurons, l_.n_neurons)
+            
+    def prop(self, error=0., learn=True):
+        self.layers[-1].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[-1].prop()
+        self.layers[-2].prop()
+        self.last_epsi = self.layers[-2].epsilon
+        for i, l in enumerate(self.layers[:-2]): #W_l
+            rhod = l.rho.d
+            l.P[0] = l.r_bar[:, :, :, None] * l.I[None, :, None, :]   # [B, n_l, n_in, 1]
+            for j, l_ in enumerate(self.layers[i+1:-1]): #du_l_/dW
+                l.P[j+1] = l_.decay[None, None, None, :] * l.P[j+1] + l_.dt_tau[None, None, 
+                    None, :] * ((l.P[j] * rhod[:, None, None, :]) @ l_.W_in.T)
+                l.P_bias[j+1] = l_.decay[None, None, :] * l.P_bias[j+1] + l_.dt_tau[None, 
+                    None, :] * ((l.P_bias[j] * rhod[:, None, :]) @ l_.W_in.T)
+                rhod = l_.rho.d
+            l.P_last = l.P[j+1]
+            l.P_bias_last = l.P_bias[j+1]
+
+    def learnW(self, update=True):
+        Grads = []
+        for i, l in enumerate(self.layers[:-2]):
+            l.dW_in += (l.P_last * self.last_epsi).sum(-1).mean(0)
+            l.dbias += (l.P_bias_last * self.last_epsi).sum(-1).mean(0)
+            if update:
+                l.W_in += l.dW_in * l.lr_w
+                l.bias += l.dbias * l.lr_b
+                grad = [l.dW_in.clone(), l.dbias.clone()]
+                Grads.append(grad)
+                l.dW_in = torch.zeros(l.n_neurons, l.n_in).to(self.device)
+                l.dbias = torch.zeros(l.n_neurons).to(self.device)
+        grad = self.layers[-2].learnW(update)
+        Grads.append(grad)
+        grad = self.layers[-1].learnW(update)
+        Grads.append(grad)
+        return Grads
 
 
+class KFRTRLNetwork(FwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=FwdRFNeurons, beta=beta, dt=dt, device=device)
 
+    def reset(self, batch=1):
+        for l in self.layers:
+            l.reset()
+        for i, l in enumerate(self.layers[:-2]):
+            l.P = {}
+            l.P_bias = {}
+            l.I = torch.eye(l.n_neurons, device=self.device)
+            l.P_bias[0] = torch.ones(batch, l.n_neurons, l.n_neurons) * l.I[None, :, :]
+            for j, l_ in enumerate(self.layers[i+1:-1]):
+                l.P[j+1] = torch.zeros(batch, l.n_neurons, l.n_in, l_.n_neurons)
+                l.P_bias[j+1] = torch.zeros(batch, l.n_neurons, l_.n_neurons)
+            
+    def prop(self, error=0., learn=True):
+        self.layers[-1].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[-1].prop()
+        self.layers[-2].prop()
+        self.last_epsi = self.layers[-2].epsilon
+        for i, l in enumerate(self.layers[:-2]): #W_l
+            rhod = l.rho.d
+            l.P[0] = l.r_bar[:, :, :, None] * l.I[None, :, None, :]   # [B, n_l, n_in, 1]
+            for j, l_ in enumerate(self.layers[i+1:-1]): #du_l_/dW
+                l.P[j+1] = l_.decay[None, None, None, :] * l.P[j+1] + l_.dt_tau[None, None, 
+                    None, :] * ((l.P[j] * rhod[:, None, None, :]) @ l_.W_in.T)
+                l.P_bias[j+1] = l_.decay[None, None, :] * l.P_bias[j+1] + l_.dt_tau[None, 
+                    None, :] * ((l.P_bias[j] * rhod[:, None, :]) @ l_.W_in.T)
+                rhod = l_.rho.d
+            l.P_last = l.P[j+1]
+            l.P_bias_last = l.P_bias[j+1]
 
-
-
-
-
+    def learnW(self, update=True):
+        Grads = []
+        for i, l in enumerate(self.layers[:-2]):
+            l.dW_in += (l.P_last * self.last_epsi).sum(-1).mean(0)
+            l.dbias += (l.P_bias_last * self.last_epsi).sum(-1).mean(0)
+            if update:
+                l.W_in += l.dW_in * l.lr_w
+                l.bias += l.dbias * l.lr_b
+                grad = [l.dW_in.clone(), l.dbias.clone()]
+                Grads.append(grad)
+                l.dW_in = torch.zeros(l.n_neurons, l.n_in).to(self.device)
+                l.dbias = torch.zeros(l.n_neurons).to(self.device)
+        grad = self.layers[-2].learnW(update)
+        Grads.append(grad)
+        grad = self.layers[-1].learnW(update)
+        Grads.append(grad)
+        return Grads
 
 
 

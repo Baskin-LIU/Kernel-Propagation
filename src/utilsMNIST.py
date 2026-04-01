@@ -36,7 +36,8 @@ default_data_config = {
 default_train_config = {
     'num_epochs': 150, 
     'learning_rate': 1e-2, 
-    'batch_size': 100, 
+    'batch_size': 100,
+    "update_times": 1,
     }
 
 default_model_config = {
