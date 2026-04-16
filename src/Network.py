@@ -3,6 +3,8 @@ from Neurons.FwdNeuron import *
 from Neurons.DeepEligNeuron import *
 from Neurons.RecNeuron import *
 
+SKIP_WEIGHT = 0.2
+
 class FwdNetwork(torch.nn.Module):
 
     def __init__(self, net=None, layers=None, beta=1., learn_depth=0, dt=0.5, device="cpu"):
@@ -36,8 +38,8 @@ class FwdNetwork(torch.nn.Module):
         r = r_in
         for i, l in enumerate(self.layers):
             r, u = l.step(r_in=r, noise=noise)
-            # if i == (self.learn_depth-1):
-            #     r = r.detach()
+            if i < self.learn_depth:
+                r = r.detach()
         return r, u
 
     
@@ -133,7 +135,71 @@ class DEFwdNetwork(FwdNetwork):
             else:
                 break 
 
+
 class DESkipNetwork(DEFwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
+        l1_ntau = self.layers[1].tau_unique.shape[0]
+        self.mask = torch.cat((self.layers[3].downstream_mask, 
+                                                       torch.arange(l1_ntau)+self.layers[1].downstream))
+        self.skip_weight = SKIP_WEIGHT #??
+
+    def prop(self, error=0., learn=True):      
+        self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[6].prop(learn=learn)
+        self.layers[5].prop(learn=learn)
+        self.layers[4].prop(learn=learn)
+        self.layers[3].prop(learn=learn)
+        self.layers[2].prop(learn=learn)
+        if learn:
+            K4_1 = torch.zeros_like(self.layers[3].K)
+            K4_1[:, self.mask] = self.layers[3].K[:, self.mask]
+            self.layers[1].K += K4_1 * self.skip_weight
+        self.layers[1].prop(learn=learn)
+        self.layers[0].prop(learn=False)
+
+    def step(self, r_in, noise=0):
+        r0,_ = self.layers[0].step(r_in=r_in)
+        r1,_ = self.layers[1].step(r_in=r0)
+        r2,_ = self.layers[2].step(r_in=r1)
+        r3,_ = self.layers[3].step(r_in=r2)
+        r4,_ = self.layers[4].step(r_in=r1*self.skip_weight+r3)
+        r5,_ = self.layers[5].step(r_in=r4) #ins
+        r,u  = self.layers[6].step(r_in=r5)
+
+        return r, u
+
+
+class SkipNetwork(FwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+        super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
+        self.layers[2].rho.scale = 1.
+        self.skip_weight = SKIP_WEIGHT
+
+    def prop(self, error=0., learn=True):      
+        self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[5].prop(learn=learn)
+        self.layers[4].prop(learn=learn)
+        self.layers[3].prop(learn=learn)
+        self.layers[2].prop(learn=learn)
+        if learn:
+            self.layers[1].epsilon += self.layers[3].epsilon * self.skip_weight
+        self.layers[1].prop(learn=learn)
+        self.layers[0].prop(learn=False)
+
+    def step(self, r_in, noise=0):
+        r0,_ = self.layers[0].step(r_in=r_in)
+        r1,_ = self.layers[1].step(r_in=r0)
+        r2,_ = self.layers[2].step(r_in=r1)
+        r3,_ = self.layers[3].step(r_in=r2)
+        r4,_ = self.layers[4].step(r_in=r1*self.skip_weight+r3)
+        r5,_ = self.layers[5].step(r_in=r4) #ins
+        r,u  = self.layers[6].step(r_in=r5)
+
+        return r, u
+
+
+class DESkipNetworkDetach(DEFwdNetwork):
     def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
         super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
         l1_ntau = self.layers[1].tau_unique.shape[0]
@@ -151,7 +217,7 @@ class DESkipNetwork(DEFwdNetwork):
         self.layers[1].decay_de = self.layers[3].decay_de
 
         self.layers[2].rho.scale = 1.
-        self.skip_weight = 1 #??
+        self.skip_weight = SKIP_WEIGHT
 
     def prop(self, error=0., learn=True):      
         self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
@@ -180,11 +246,11 @@ class DESkipNetwork(DEFwdNetwork):
         return r, u
 
 
-class SkipNetwork(FwdNetwork):
+class SkipNetworkDetach(FwdNetwork):
     def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
         super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
         self.layers[2].rho.scale = 1.
-        self.skip_weight = 1
+        self.skip_weight = SKIP_WEIGHT
 
     def prop(self, error=0., learn=True):      
         self.layers[6].E_trg(e_trg=self.beta*error*self.dt)
@@ -257,7 +323,6 @@ class AllSkipNetwork(FwdNetwork):
         super().__init__(net=net, layers=layers, beta=beta, dt=dt, device=device)
         for l in self.layers:
             l.rho.scale = 1.
-    #def prop(self, error=0., learn=True):      
 
     def step(self, r_in, noise=0):
         
@@ -329,56 +394,96 @@ class RTRLNetwork(FwdNetwork):
         return Grads
 
 
-class KFRTRLNetwork(FwdNetwork):
-    def __init__(self, net=None, layers=None, beta=1., dt=0.5, device="cpu"):
+class UORONetwork(FwdNetwork):
+    def __init__(self, net=None, layers=None, beta=1., dt=0.5, n_LP=3, device="cpu"):
         super().__init__(net=net, layers=FwdRFNeurons, beta=beta, dt=dt, device=device)
-
+        self.n_LP = n_LP
+        self.n_Ins = len(self.layers) - self.n_LP
+        self.total_neurons = sum(l.n_neurons for l in self.layers[:self.n_LP])
+        self.total_weights = self.total_weights = sum(l.W_in.numel() + l.n_neurons for l in self.layers[:self.n_LP])
+        
     def reset(self, batch=1):
         for l in self.layers:
             l.reset()
-        for i, l in enumerate(self.layers[:-2]):
-            l.P = {}
-            l.P_bias = {}
-            l.I = torch.eye(l.n_neurons, device=self.device)
-            l.P_bias[0] = torch.ones(batch, l.n_neurons, l.n_neurons) * l.I[None, :, :]
-            for j, l_ in enumerate(self.layers[i+1:-1]):
-                l.P[j+1] = torch.zeros(batch, l.n_neurons, l.n_in, l_.n_neurons)
-                l.P_bias[j+1] = torch.zeros(batch, l.n_neurons, l_.n_neurons)
+        self.utilde = torch.zeros(1, self.total_neurons, device=self.device)
+        self.thetatilde = torch.zeros(1, self.total_weights, device=self.device)
             
     def prop(self, error=0., learn=True):
+        self.batch = self.layers[0].r.shape[0]
         self.layers[-1].E_trg(e_trg=self.beta*error*self.dt)
-        self.layers[-1].prop()
-        self.layers[-2].prop()
-        self.last_epsi = self.layers[-2].epsilon
-        for i, l in enumerate(self.layers[:-2]): #W_l
-            rhod = l.rho.d
-            l.P[0] = l.r_bar[:, :, :, None] * l.I[None, :, None, :]   # [B, n_l, n_in, 1]
-            for j, l_ in enumerate(self.layers[i+1:-1]): #du_l_/dW
-                l.P[j+1] = l_.decay[None, None, None, :] * l.P[j+1] + l_.dt_tau[None, None, 
-                    None, :] * ((l.P[j] * rhod[:, None, None, :]) @ l_.W_in.T)
-                l.P_bias[j+1] = l_.decay[None, None, :] * l.P_bias[j+1] + l_.dt_tau[None, 
-                    None, :] * ((l.P_bias[j] * rhod[:, None, :]) @ l_.W_in.T)
-                rhod = l_.rho.d
-            l.P_last = l.P[j+1]
-            l.P_bias_last = l.P_bias[j+1]
+        for i in range(self.n_Ins+1):
+            self.layers[-i-1].prop()
+            
+        nu = torch.randint(0, 2, self.utilde.shape, device=self.device).float() * 2 - 1
+        utilde_new = torch.zeros_like(self.utilde)
+        offset, next_term = self.total_neurons, 0
+    
+        # -------- utilde propagation ----------
+        for l in reversed(self.layers[:self.n_LP]):
+            n = l.n_neurons
+            idx = slice(offset-n, offset)
+            # decay
+            utilde_new[:, idx] = l.decay * self.utilde[:, idx]
+            utilde_new[:, idx] += l.rho.d * next_term
+            if l.previous_layer is not None:
+                next_term = l.dt_tau * self.utilde[:, idx] @ l.W_in.T
+            offset -= n
+    
+        # -------- compute P^T nu --------------
+        ptTnu = torch.zeros_like(self.thetatilde)
+        offset_n, offset_w = 0, 0
+    
+        for l, layer in enumerate(self.layers[:self.n_LP]):
+            n = layer.n_neurons
+            m = layer.W_in.shape[1]
+    
+            idx_n = slice(offset_n, offset_n+n)
+    
+            nu_l = nu[:, idx_n]
+            grad_w = (
+                nu_l[:, :, None] * layer.r_in[:, None, :] * layer.dt_tau[None, :, None] 
+            ).reshape(self.batch, -1)
+            grad_b = 1. * nu_l # bias gradient
+            grad = torch.cat([grad_w, grad_b], dim=1)
+    
+            size = grad.shape[1]
+            ptTnu[:, offset_w:offset_w+size] = grad
+    
+            offset_w += size
+            offset_n += n
+    
+        # -------- rank-1 update ---------------
+        eps = 1e-7
+        norm_s = utilde_new.norm(dim=1, keepdim=True) + eps
+        norm_nu = nu.norm(dim=1, keepdim=True) + eps
+        rho0 = torch.sqrt(self.thetatilde.norm(dim=1, keepdim=True) / norm_s + eps)
+        rho1 = torch.sqrt(ptTnu.norm(dim=1, keepdim=True) / norm_nu + eps )
+        
+        self.utilde = rho0 * utilde_new + rho1 * nu
+        self.thetatilde = self.thetatilde / rho0 + ptTnu / rho1
+
+        #print(self.utilde, self.thetatilde, rho0, rho1)
 
     def learnW(self, update=True):
-        Grads = []
-        for i, l in enumerate(self.layers[:-2]):
-            l.dW_in += (l.P_last * self.last_epsi).sum(-1).mean(0)
-            l.dbias += (l.P_bias_last * self.last_epsi).sum(-1).mean(0)
-            if update:
-                l.W_in += l.dW_in * l.lr_w
-                l.bias += l.dbias * l.lr_b
-                grad = [l.dW_in.clone(), l.dbias.clone()]
-                Grads.append(grad)
-                l.dW_in = torch.zeros(l.n_neurons, l.n_in).to(self.device)
-                l.dbias = torch.zeros(l.n_neurons).to(self.device)
-        grad = self.layers[-2].learnW(update)
-        Grads.append(grad)
-        grad = self.layers[-1].learnW(update)
-        Grads.append(grad)
-        return Grads
+        last_LP = self.layers[self.n_LP-1]
+        dLdu = last_LP.epsilon
+        grad = (dLdu * self.utilde[:, -last_LP.n_neurons:]).sum(-1, keepdim=True) * self.thetatilde
+        grad = torch.clamp(grad.mean(0), -0.05, 0.05)
+        offset_w = 0
+        for i, l in enumerate(self.layers):
+            if i < self.n_LP:
+                n_w, n_b = l.W_in.numel(), l.n_neurons
+                l.dW_in += grad[offset_w : offset_w + n_w].reshape(l.dW_in.shape)
+                l.dbias += grad[offset_w + n_w : offset_w + n_w + n_b]
+                offset_w += n_w + n_b
+                if update:
+                    #print(l.dW_in, l.dbias)
+                    l.W_in += l.dW_in * l.lr_w * 2
+                    l.bias += l.dbias * l.lr_b * 2
+                    l.dW_in = torch.zeros(l.n_neurons, l.n_in).to(self.device)
+                    l.dbias = torch.zeros(l.n_neurons).to(self.device)
+            else:
+                l.learnW(update)
 
 
 

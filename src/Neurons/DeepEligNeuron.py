@@ -88,7 +88,8 @@ class FwdDENeurons(FwdNeurons):
         dW_in = -(K.unsqueeze(-1)*self.elig).sum(1).mean(0)
         dbias = -(K * self.elig_b).sum(1).mean(0)
 
-        self.rhod_bar = self.rhod_bar * self.decay[None, :] + self.rho.d * self.dt_tau[None, :]
+        self.rhod_bar = self.rhod_bar * self.decay_rho + self.rho.d * self.dt_tau_rho
+        #self.rhod_bar = self.rhod_bar * self.decay[None, :] + self.rho.d * self.dt_tau[None, :]
         if self.previous_layer is not None: 
             if hasattr(self, 'Kv2'):
                 self.previous_layer[0].Kv2 = (self.rhod_bar[:, None, :] * self.P * self.Kv2) @ self.W_in
@@ -153,6 +154,10 @@ class FwdDEInsNeurons(FwdDENeurons):
 
 class FwdDENeuronsV2(FwdDENeurons):
 
+    def custom_init(self,):
+        self.register_buffer('decay_rho', self.decay.clone())
+        self.register_buffer('dt_tau_rho', self.dt_tau.clone())
+
     def prop(self, learn=True):
         # Update eligibility trace (batch, n_exp, n_neuron, n_in)
         self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:
@@ -160,7 +165,7 @@ class FwdDENeuronsV2(FwdDENeurons):
         # Bias eligibility (batch, n_exp, n_neuron)
         self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
 
-        self.rhod_bar = self.rhod_bar * self.decay[None, :] + self.rho.d * self.dt_tau[None, :]
+        self.rhod_bar = self.rhod_bar * self.decay_rho + self.rho.d * self.dt_tau_rho
         # Kernel propagation
         if learn and self.previous_layer is not None:  
             #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)

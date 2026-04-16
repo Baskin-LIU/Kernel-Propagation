@@ -32,7 +32,7 @@ class LastFwdDERLNeurons(LastFwdDENeurons):
         self.eligbiasRL = 0.
 
 
-class FwdDERLNeurons(FwdDENeurons):
+class FwdDERLNeurons(FwdDENeuronsV2):
 
     def backwardsRL(self, delta, gamma, labd):
         K = self.K[:,:self.downstream].clone()

@@ -116,7 +116,8 @@ def buildKPNet(model_config, general_config):
             model = DEFwdNetwork(layers=layers, device=device, dt=dt)
     else:
         model = DEFwdNetwork(layers=layers, device=device, dt=dt)
-
+        
+    model.learn_depth = model_config['learn_depth']
     if 'upsample' in model_config and model_config["upsample"]:
         print("Upsample Input")
         with torch.no_grad():
@@ -200,12 +201,6 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
             device=device,
             )
     )
-        
-    # if 'skip_connection' in model_config and model_config['skip_connection']:
-    #     model = SkipNetwork(layers=layers, dt=dt, device=device)
-    #     print("skip connection activated")
-    # else:
-    #     model = FwdNetwork(layers=layers, dt=dt, device=device)
 
     if 'skip_connection' in model_config:
         if model_config['skip_connection']=='All':
@@ -229,16 +224,18 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
             model.layers[0].W_in *= torch.tensor(weights)[:, None]
             model.layers[1].rho.scale = 1.
             model.learn_depth = 1
-
-    if neurontype=='LE':
-        for l in model.layers[:model_config['num_LP_layers']]:
-            l.tau_dt *= 0
-    if neurontype=="RF/E":
-        model.learn_depth = model_config['num_LP_layers']-1
+            
     if neurontype=="BPTT":
         for l in model.layers[:model.learn_depth]:
             l.W_in.requires_grad = False
             l.bias.requires_grad = False
+    if neurontype=='LE':
+        for l in model.layers[:model_config['num_LP_layers']]:
+            l.tau_dt *= 0
+    model.learn_depth = model_config['learn_depth']
+    
+    if neurontype=="RF/E":
+        model.learn_depth = model_config['num_LP_layers']-1
     
     return model
     

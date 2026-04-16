@@ -56,8 +56,9 @@ default_model_config = {
     'Tau3': [2.5, 8.0],
     "answer_period": 360,
     "upsample": False,
-    "skip_connection":False,
-    "version":"V2"
+    "skip_connection": False,
+    "version": "V2",
+    "learn_depth": 0,
     }
 
 

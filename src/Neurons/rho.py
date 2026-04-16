@@ -66,12 +66,12 @@ class tanh(rho):
 
     def __call__(self, x):
         a = torch.tanh(self.scale*x)
-        self.d = self.scale*(1.0 - a**2)
+        self.d = (1.0 - a**2)*self.scale
         return a
 
     def derivation(self, x):
         a = torch.tanh(self.scale*x)
-        return self.scale*(1.0 - a**2)
+        return self.scale*(1.0 - a**2) #TODO match up version
 
 
 class softplus(rho):

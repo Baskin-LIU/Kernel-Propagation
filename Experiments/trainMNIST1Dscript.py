@@ -34,14 +34,13 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dt", type=float, default=1.) #ms
     parser.add_argument("--visual_kernel", dest="visual_kernel", action="store_true")
-    #parser.add_argument("--machine", type=str, default="MLcloud")
     
     ### Training config
     parser.add_argument("--lr", type=float, default=1e-2)
-    parser.add_argument("--num_epochs", type=int, default=150)
+    parser.add_argument("--num_epochs", type=int, default=180)
     parser.add_argument("--answer_t", type=int, default=360)
     parser.add_argument("--method", type=str, default='KP')
-    parser.add_argument("--update_times", type=int, default=3)
+    parser.add_argument("--update_times", type=int, default=2)
 
     ### Data config
     parser.add_argument("--prepad", type=int, default=0)
@@ -52,17 +51,19 @@ if __name__ == "__main__":
     parser.add_argument("--rho_scale", type=float, default=0.6)
     parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
+    parser.add_argument("--learn_depth", type=int, default=0)
     parser.add_argument("--LP_size", type=int, nargs="+",
         help="Hidden Low-pass layer sizes", default=[60, 90, 90, 90],)
     parser.add_argument("--Ins_size", type=int, nargs="+", default=[120, ],)
     parser.add_argument("--Tau0", type=int, nargs=3, default=[1, 10, 6],)
     parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 6],)
     parser.add_argument("--Tau2", type=float, nargs="+", default=[2, 7],)
-    parser.add_argument("--Tau3", type=float, nargs="+", default=[2.5, 8.],)
+    parser.add_argument("--Tau3", type=float, nargs="+", default=[1., 8.],)
     parser.add_argument("--Tau4", type=float, nargs="+", default=[2.5, 6.6],)
     parser.add_argument("--upsample", dest="upsample", action="store_true")
     parser.add_argument("--skip", dest="skip", action="store_true")
     parser.add_argument("--small", dest="small", action="store_true")
+    
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, 
                         upsample=False, skip=False, small=False)
@@ -108,6 +109,7 @@ if __name__ == "__main__":
         model_config["Tau%d"%i] =getattr(args, "Tau%d"%i)
     model_config["upsample"] = args.upsample
     model_config["rho_scale"] = args.rho_scale
+    model_config["learn_depth"] = args.learn_depth
 
     # Training Config
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
@@ -115,6 +117,7 @@ if __name__ == "__main__":
     train_config["batch_size"] = args.batch
     train_config["method"] = args.method
     train_config["update_times"] = args.update_times
+    
     
     # Dataset Config
     data_config["prepad"] = args.prepad
@@ -126,7 +129,9 @@ if __name__ == "__main__":
     data_config["final_seq_length"] = int(data_config["duration"]/dt)
 
     if args.small: #small model (14k) quick config
-        model_config["LP_size"] = [36, 54, 60, 60] # acc 92
+        model_config["LP_size"] = [36, 54, 60, 60]
+        model_config["num_LP_layers"] = 4
+        model_config['Tau3'] = [2.5, 8.]
         model_config["Ins_size"] = [72]
 
     if args.skip: #small skip connection quick config
@@ -135,7 +140,7 @@ if __name__ == "__main__":
         model_config["Ins_size"] = [72]
         model_config["num_LP_layers"] = 5
         model_config['Tau3'] = [1, 8.0]
-        model_config['Tau4'] = args.Tau4 #[2.5, 6.6]
+        model_config['Tau4'] = args.Tau4
 
     ########## Logging Config ##########
     print("Wandb configuration started...")
@@ -187,7 +192,6 @@ if __name__ == "__main__":
     if args.method=='BPTT':
         model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         train_fn = train_batch_BPTT
-        factor = 0.75
         adam_beta = (0.9, 0.999)
     else:
         if train_config["update_times"]>1:
@@ -195,7 +199,6 @@ if __name__ == "__main__":
             train_fn = train_batch_periodic(update_timing = update_timing)
         else:
             train_fn = train_batch_delay
-        factor = 0.75
         adam_beta = (0.8, 0.995)
         if args.method=='KP':
             model = buildKPNet(model_config, general_config).to(device)
@@ -212,12 +215,7 @@ if __name__ == "__main__":
         betas=adam_beta
     )
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=factor,
-        patience=2
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_config["num_epochs"])
 
     if general_config["visual_kernel"]:
         kernel_record_pre = extract_kernel(
@@ -249,7 +247,7 @@ if __name__ == "__main__":
 
         test_acc, test_loss = test(model, x_test.to(device), y_test.to(device),
                                 answer_steps, pad_steps, beta)
-        scheduler.step(test_loss)
+        scheduler.step()
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
