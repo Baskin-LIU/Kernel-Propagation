@@ -121,14 +121,13 @@ class CartPoleCustomize(gym.Wrapper):
             self.obs_mask = [0, 1, 2, 3]
 
     def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        self.set_masspole(0.1)
-        return torch.tensor(obs[self.obs_mask])[None, :], info
+        self.obs, info = self.env.reset(**kwargs)
+        return torch.tensor(self.obs[self.obs_mask])[None, :], info
 
     def step(self, action):
-        obs, reward, done, truncated, info = self.env.step(action)
-        reward = reward - 5*np.maximum(0, np.abs(obs[2]) - self.angle_punish_threshold) - np.maximum(0, np.abs(obs[0]) - self.x_punish_threshold)
-        obs = torch.tensor(obs[self.obs_mask])[None, :]
+        self.obs, reward, done, truncated, info = self.env.step(action)
+        reward = reward - 5*np.maximum(0, np.abs(self.obs[2]) - self.angle_punish_threshold) - np.maximum(0, np.abs(self.obs[0]) - self.x_punish_threshold)
+        obs = torch.tensor(self.obs[self.obs_mask])[None, :]
 
         return obs, reward, done, truncated, info
 
@@ -141,6 +140,28 @@ class CartPoleCustomize(gym.Wrapper):
     def set_wind(self, wind):
         env = self.env.unwrapped
         env.wind = wind
+
+    def reset_center(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict | None = None,
+    ):
+        super().reset(seed=seed)
+        # Note that if you use custom reset bounds, it may lead to out-of-bound
+        # state/observations.
+        # low, high = utils.maybe_parse_reset_bounds(
+        #     options,
+        #     -0.05,
+        #     0.05,  # default low
+        # )  # default high
+        # self.state = self.np_random.uniform(low=low, high=high, size=(4,))
+        env = self.env.unwrapped
+        env.state = np.zeros(4,)
+
+        obs = torch.tensor(np.array(env.state, dtype=np.float32)[self.obs_mask])[None, :]
+
+        return obs, {}
 
 
 

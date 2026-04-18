@@ -63,7 +63,7 @@ def buildKPNet(model_config, general_config):
                     tau=tau[i+1], 
                     activation=model_config["activation"], 
                     dt=dt, 
-                    scale=model_config["rho_scale"],# 0.6,
+                    scale=model_config["rho_scale"],
                     device=device,
                 )
             )
@@ -159,10 +159,10 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
             scale = 1.
             activation = model_config["activation"]
         elif model_config["reducedNonlinear"]:
-            scale=1.
+            scale= 1.
             activation = "linear"
         else:
-            scale=0.6
+            scale= model_config["rho_scale"]
             activation = model_config["activation"]
 
         layers.append(
