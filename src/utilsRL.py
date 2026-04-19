@@ -143,11 +143,8 @@ class CartPoleCustomize(gym.Wrapper):
 
     def reset_center(
         self,
-        *,
-        seed: int | None = None,
-        options: dict | None = None,
     ):
-        super().reset(seed=seed)
+        super().reset()
         # Note that if you use custom reset bounds, it may lead to out-of-bound
         # state/observations.
         # low, high = utils.maybe_parse_reset_bounds(
