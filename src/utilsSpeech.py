@@ -65,8 +65,8 @@ default_data_config = {
     }
 
 default_train_config = {
-    'num_epochs': 150, 
-    'learning_rate': 2e-3, 
+    'num_epochs': 200, 
+    'learning_rate': 1e-3, 
     'batch_size': 256,
     'update_interval': 200, #ms
     'num_workers': 4,
@@ -77,20 +77,23 @@ default_train_config = {
 default_model_config = {
     'n_in': 80, 
     'n_out': 20, 
-    'num_LP_layers': 5, 
+    'num_LP_layers': 6, 
     'num_Ins_layers': 1,
-    'rho_scale': 0.6,
-    'LP_size': [120, 120, 120, 120, 150], 
+    'rho_scale': 1.,
+    'LP_size': [120, 120, 120, 120, 120, 150], 
     'Ins_size': [150, ], 
-    'activation': 'tanh', 
+    'activation': 'sigmoid', 
     "reducedNonlinear": False,
     'Tau0': [default_general_config['dt'], 50, 6], 
     'Tau1': [3, 12, 24], 
     'Tau2': [4, 16, 48],
     'Tau3': [5, 20],
-    'Tau4': [100, 400],
+    'Tau4': [5, 20],
+    'Tau5': [40, 80],
     "answer_period": 600,
-    "skip_connection": "All",
+    "skip_connection": False,
+    "version": "V2",
+    "learn_depth": 0,
     }
 
 

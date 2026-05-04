@@ -126,7 +126,7 @@ class CartPoleCustomize(gym.Wrapper):
 
     def step(self, action):
         self.obs, reward, done, truncated, info = self.env.step(action)
-        reward = reward - 5*np.maximum(0, np.abs(self.obs[2]) - self.angle_punish_threshold) - np.maximum(0, np.abs(self.obs[0]) - self.x_punish_threshold)
+        #reward = reward - 5*np.maximum(0, np.abs(self.obs[2]) - self.angle_punish_threshold) - np.maximum(0, np.abs(self.obs[0]) - self.x_punish_threshold)
         obs = torch.tensor(self.obs[self.obs_mask])[None, :]
 
         return obs, reward, done, truncated, info

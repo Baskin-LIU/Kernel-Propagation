@@ -48,13 +48,13 @@ if __name__ == "__main__":
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
-    parser.add_argument("--rho_scale", type=float, default=0.6)
-    parser.add_argument("--num_LP_layers", type=int, default=4)
+    parser.add_argument("--rho_scale", type=float, default=0.5)
+    parser.add_argument("--num_LP_layers", type=int, default=5)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--learn_depth", type=int, default=0)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[60, 90, 90, 90],)
-    parser.add_argument("--Ins_size", type=int, nargs="+", default=[120, ],)
+        help="Hidden Low-pass layer sizes", default=[60, 60, 60, 60, 72],)
+    parser.add_argument("--Ins_size", type=int, nargs="+", default=[72, ],)
     parser.add_argument("--Tau0", type=int, nargs=3, default=[1, 10, 6],)
     parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 6],)
     parser.add_argument("--Tau2", type=float, nargs="+", default=[2, 7],)
@@ -132,15 +132,9 @@ if __name__ == "__main__":
         model_config["LP_size"] = [36, 54, 60, 60]
         model_config["num_LP_layers"] = 4
         model_config['Tau3'] = [2.5, 8.]
-        model_config["Ins_size"] = [72]
 
     if args.skip: #small skip connection quick config
         model_config['skip_connection'] = "One"
-        model_config["LP_size"] = [60, 60, 60, 60, 72]
-        model_config["Ins_size"] = [72]
-        model_config["num_LP_layers"] = 5
-        model_config['Tau3'] = [1, 8.0]
-        model_config['Tau4'] = args.Tau4
 
     ########## Logging Config ##########
     print("Wandb configuration started...")
@@ -202,7 +196,7 @@ if __name__ == "__main__":
         adam_beta = (0.8, 0.995)
         if args.method=='KP':
             model = buildKPNet(model_config, general_config).to(device)
-        elif args.method in ['GLE','RF/E','LE']:
+        elif args.method in ['GLE','RF/E','LE', 'OSTL']:
             model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError

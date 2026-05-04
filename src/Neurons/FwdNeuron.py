@@ -231,7 +231,9 @@ class FwdRFNeurons(FwdNeurons):
         return self.r, self.u_bar
     
     def prop(self, **kwargs):
-        super().prop()
+        self.epsilon = self.wTe * self.rho.d
+        if self.previous_layer is not None:
+            self.previous_layer[0].wTe = self.dt_tau*self.epsilon @ self.W_in
         return 0, 0
 
     def learnW(self, update=True):

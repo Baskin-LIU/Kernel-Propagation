@@ -1,0 +1,45 @@
+{
+    "Ins_size": [
+        72
+    ],
+    "LP_size": [
+        60,
+        60,
+        60,
+        60,
+        72
+    ],
+    "Tau0": [
+        1,
+        10,
+        6
+    ],
+    "Tau1": [
+        3,
+        6
+    ],
+    "Tau2": [
+        2,
+        7
+    ],
+    "Tau3": [
+        1.0,
+        8.0
+    ],
+    "Tau4": [
+        2.5,
+        6.6
+    ],
+    "activation": "tanh",
+    "answer_period": 360,
+    "learn_depth": 0,
+    "n_in": 1,
+    "n_out": 10,
+    "num_Ins_layers": 1,
+    "num_LP_layers": 5,
+    "reducedNonlinear": false,
+    "rho_scale": 1.0,
+    "skip_connection": false,
+    "upsample": false,
+    "version": "V2"
+}

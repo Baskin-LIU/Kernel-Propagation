@@ -146,7 +146,7 @@ def buildNetCompare(model_config, general_config, neurontype='GLE'):
     layers = torch.nn.ModuleList()
     if neurontype=='GLE' or neurontype=='LE':
         layer_fn = FwdGLENeurons  
-    elif neurontype=='RF/E':
+    elif neurontype=='RF/E' or neurontype=='OSTL':
         layer_fn = FwdRFNeurons
     elif neurontype=='BPTT':
         layer_fn = FwdNeurons

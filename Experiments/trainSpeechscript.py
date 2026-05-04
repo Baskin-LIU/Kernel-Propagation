@@ -239,12 +239,9 @@ if __name__ == "__main__":
         betas=adam_betas,
     )
     
-    train_config["factor"] = 0.75 if args.method=='BPTT' else 0.6
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=train_config["factor"],
-        patience=2
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=train_config["num_epochs"]
     )
 
     if args.cont_train: #load midway model
@@ -322,7 +319,7 @@ if __name__ == "__main__":
         Cum_loss /= len(train_loader.dataset)
 
         val_acc, val_loss = test(model, val_loader, answer_steps, beta)
-        scheduler.step(val_loss)
+        scheduler.step()
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc

@@ -1,0 +1,7 @@
+{
+    "device": "cuda",
+    "dt": 1.0,
+    "seed": 428,
+    "short_training_run": false,
+    "visual_kernel": false
+}
