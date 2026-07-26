@@ -62,8 +62,10 @@ class FwdDENeurons(FwdNeurons):
 
     def prop_noise(self, learn=True, noise=0.0):
         # Update eligibility trace (batch, n_exp, n_neuron, n_in)
+        n = noise * torch.randn_like(self.elig)
+        #print(self.r_bar, n)
         self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:
-            ,None,None] * (self.rho.d[:,None,:,None] * (self.r_bar + noise * torch.randn_like(self.r_bar))[:,None,:,:])
+            ,None,None] * (self.rho.d[:,None,:,None] * self.r_bar[:,None,:,:] + n)
         # Bias eligibility (batch, n_exp, n_neuron)
         self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
         # Kernel propagation
