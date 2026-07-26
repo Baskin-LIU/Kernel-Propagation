@@ -48,6 +48,13 @@ class FwdNetwork(torch.nn.Module):
         for l in reversed(self.layers[self.learn_depth:]):
             l.prop(learn=learn)
 
+    def prop_noise(self, error=0., learn=True, noise=0.):
+        self.layers[-1].E_trg(e_trg=self.beta*error*self.dt)
+        self.layers[-1].prop(learn=learn)
+        self.layers[-2].prop(learn=learn)
+        self.layers[-3].prop(learn=learn)
+        for l in reversed(self.layers[:-3]):
+            l.prop_noise(learn=learn, noise=noise)
 
     def backwards(self,):
         for l in reversed(self.layers[self.learn_depth:]):

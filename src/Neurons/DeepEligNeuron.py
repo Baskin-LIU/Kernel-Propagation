@@ -59,6 +59,19 @@ class FwdDENeurons(FwdNeurons):
             self.previous_layer[0].K = (self.rho.d[:, None, :] * self.P * self.K) @ self.W_in
         
         return 0, 0
+
+    def prop_noise(self, learn=True, noise=0.0):
+        # Update eligibility trace (batch, n_exp, n_neuron, n_in)
+        self.elig = self.decay_de[None,:,None,None] * self.elig + self.dt_tau_de[None,:
+            ,None,None] * (self.rho.d[:,None,:,None] * (self.r_bar + noise * torch.randn_like(self.r_bar))[:,None,:,:])
+        # Bias eligibility (batch, n_exp, n_neuron)
+        self.elig_b = self.decay_de[None,:,None] * self.elig_b + self.dt_tau_de[None, :, None] * self.rho.d[:, None, :]
+        # Kernel propagation
+        if learn and self.previous_layer is not None:  
+            #(batch,n_exp,n_neuron)*(n_neuron,n_in) -> (batch,n_exp,n_in)
+            self.previous_layer[0].K = (self.rho.d[:, None, :] * self.P * self.K) @ self.W_in
+        
+        return 0, 0
     
     def learnW(self, update=True):
         K = self.K[:,self.downstream_mask].clone()

@@ -196,3 +196,34 @@ def train_batch_BPTT(model, optimizer, x, y, answer_step, pad_steps, beta):
             
     return total_loss.detach()
 
+
+def train_batch_noise(model, optimizer, x, y, answer_step, pad_steps, beta, noise):
+    n_steps = x.shape[1]
+    avg_p = 0.
+    with torch.no_grad():
+        one_hot_label = F.one_hot(y, num_classes=10)
+        model.reset()
+        prex = torch.zeros(x.shape[0], 1).to(model.device)
+        for t in range(pad_steps):
+            #r_out,_ = model.step_noise(prex, noise)
+            r_out,_ = model.step(prex, noise=noise)
+            model.prop_noise(learn=False, noise=noise)
+        for t in range(n_steps):
+            r_out,_ = model.step(x[:, t])
+            if n_steps-t <= answer_step:
+                p = torch.softmax(r_out, dim=1)
+                if beta[t] != 0:
+                    error = (one_hot_label - p)*beta[t]
+                    model.prop_noise(error=error, noise=noise)
+                    model.backwards()
+                else:
+                    model.prop_noise(learn=False, noise=noise)
+                avg_p = p + avg_p
+            else:
+                model.prop_noise(learn=False, noise=noise)
+        optimizer.step()
+    
+        avg_p /= answer_step
+        total_loss = -(one_hot_label * torch.log(avg_p+1e-7)).mean().item()        
+            
+    return total_loss

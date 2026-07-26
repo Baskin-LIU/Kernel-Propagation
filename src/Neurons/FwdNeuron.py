@@ -112,7 +112,16 @@ class FwdNeurons(Neurons):
         self.r = self.rho(self.u_bar)
 
     def step_uniq(self, r_in, noise=0.):
-        self.r_bar_uniq = self.decay_uniq[None, :, None] * self.r_bar_uniq + self.dt_tau_uniq[None, :, None] * r_in[:, None, :]
+        self.r_bar_uniq = (self.decay_uniq[None, :, None] * self.r_bar_uniq 
+                           + self.dt_tau_uniq[None, :, None] * r_in[:, None, :])
+        self.r_bar = torch.repeat_interleave(self.r_bar_uniq, self.repeat_tau, dim=1)
+        self.u_bar = (self.r_bar*self.W_in).sum(-1) + self.bias
+        
+        self.r = self.rho(self.u_bar)
+
+    def step_noise(self, r_in, noise=0.1):
+        self.r_bar_uniq = (self.decay_uniq[None, :, None] * self.r_bar_uniq 
+                           + self.dt_tau_uniq[None, :, None] * (r_in + noise * torch.randn_like(r_in))[:, None, :])
         self.r_bar = torch.repeat_interleave(self.r_bar_uniq, self.repeat_tau, dim=1)
         self.u_bar = (self.r_bar*self.W_in).sum(-1) + self.bias
         
