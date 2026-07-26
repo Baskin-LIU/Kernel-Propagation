@@ -38,8 +38,8 @@ if __name__ == "__main__":
     #parser.add_argument("--machine", type=str, default="MLcloud")
     
     ### Training config
-    parser.add_argument("--lr", type=float, default=2e-3)
-    parser.add_argument("--num_epochs", type=int, default=60)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--num_epochs", type=int, default=76)
     parser.add_argument("--answer_t", type=int, default=600)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--method", type=str, default='KP')
@@ -59,18 +59,19 @@ if __name__ == "__main__":
     
     ### Model config
     parser.add_argument("--activation", type=str, default='tanh')
-    parser.add_argument("--num_LP_layers", type=int, default=5)
+    parser.add_argument("--num_LP_layers", type=int, default=4)
     parser.add_argument("--num_Ins_layers", type=int, default=1)
     parser.add_argument("--LP_size", type=int, nargs="+",
-        help="Hidden Low-pass layer sizes", default=[300, 300, 300, 300, 360],)
-    parser.add_argument("--Ins_size", type=int, nargs="+", default=[360, ],)
-    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 40, 30],)
+        help="Hidden Low-pass layer sizes", default=[240, 360, 360, 400],)
+    parser.add_argument("--Ins_size", type=int, nargs="+", default=[400, ],)
+    parser.add_argument("--Tau0", type=int, nargs=3, default=[2, 40, 6],)
     parser.add_argument("--Tau1", type=float, nargs="+", default=[3, 12, 24],)
     parser.add_argument("--Tau2", type=float, nargs="+", default=[4, 16, 36],)
     parser.add_argument("--Tau3", type=float, nargs="+", default=[5, 14],)
     parser.add_argument("--Tau4", type=float, nargs="+", default=[6, 15],)
     parser.add_argument("--Tau5", type=float, nargs="+", default=[7, 18],)
     parser.add_argument("--TauL", type=float, nargs="+", default=[50, 400],) #Last LP layer
+    parser.add_argument("--version", type=int, default=1) #Last LP layer
     
     parser.set_defaults(short_run=False, visual_kernel=False, save_local=True, weighted_sampler=False, cont_train=False)
     
@@ -115,6 +116,7 @@ if __name__ == "__main__":
     for i in range(model_config["num_LP_layers"]-1):
         model_config["Tau%d"%i] =getattr(args, "Tau%d"%i)
     model_config["Tau%d"%(i+1)] =getattr(args, "TauL")
+    model_config["version"] = "V"+str(args.version)
 
     # Training Config
     train_config["num_epochs"] = 1 if general_config["short_training_run"] else args.num_epochs
@@ -225,9 +227,7 @@ if __name__ == "__main__":
             train_fn = train_batch_periodic(args.update_interval) #Not Implemented Yet
         if args.method=='KP':
             model = buildKPNet(model_config, general_config).to(device)
-        elif args.method=='GLE':
-            model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
-        elif args.method=='RFLO':
+        elif args.method in ['GLE','RF/E','LE', 'OSTL']:
             model = buildNetCompare(model_config, general_config, neurontype=args.method).to(device)
         else:
             raise NotImplementedError
@@ -244,7 +244,7 @@ if __name__ == "__main__":
         T_max=train_config["num_epochs"]
     )
 
-    if args.cont_train: #load midway model
+    if args.cont_train and args.method=='KP': #load midway model
         ckp = torch.load(Path("..") / "midway_models" / (args.group_name+f"{args.seed}.pt"))
         model.load_state_dict(ckp['model'])
         optimizer.load_state_dict(ckp['optimizer'])

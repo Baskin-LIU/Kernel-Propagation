@@ -77,12 +77,12 @@ default_train_config = {
 default_model_config = {
     'n_in': 80, 
     'n_out': 20, 
-    'num_LP_layers': 6, 
+    'num_LP_layers': 4, 
     'num_Ins_layers': 1,
-    'rho_scale': 1.,
-    'LP_size': [120, 120, 120, 120, 120, 150], 
-    'Ins_size': [150, ], 
-    'activation': 'sigmoid', 
+    'rho_scale': 0.6,
+    'LP_size': [240, 360, 360, 400], 
+    'Ins_size': [400, ], 
+    'activation': 'tanh', 
     "reducedNonlinear": False,
     'Tau0': [default_general_config['dt'], 50, 6], 
     'Tau1': [3, 12, 24], 
@@ -92,7 +92,7 @@ default_model_config = {
     'Tau5': [40, 80],
     "answer_period": 600,
     "skip_connection": False,
-    "version": "V2",
+    "version": "V1",
     "learn_depth": 0,
     }
 
